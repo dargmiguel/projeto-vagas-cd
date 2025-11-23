@@ -15,9 +15,14 @@ import os
 from src.utils.checkpoint_manager import CheckpointManager
 
 # Configurar logging
+Path("logs").mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("logs/bronze_gupy.log")
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -29,13 +34,13 @@ class Config:
 
     api_url: str
     limit: int = 100
-    page_size: int = 50
     max_antigas: int = 10
     sleep_ok: int = 2
     sleep_error: int = 10
-    max_paginas_full: int = 99
-    max_paginas_incremental: int = 2
+    max_paginas_full: int = 50
+    max_paginas_incremental: int = 50
     timeout: int = 30
+    max_offset: int = 9900
 
 
     @classmethod
@@ -96,6 +101,8 @@ def decidir_modo(modo: str, checkpoint: Optional[dict]) -> tuple[str, Optional[s
         return 'full', None, Config.from_env().max_paginas_full
     if checkpoint is None:
         raise RuntimeError("Checkpoint necessário para modo incremental")
+
+
     logger.info(f" Incremental solicitado: Desde {checkpoint['ultima_data_publicacao']}")
     return 'incremental', checkpoint['ultima_data_publicacao'], Config.from_env().max_paginas_incremental
 
@@ -111,7 +118,7 @@ def extrair_vagas(session: requests.Session, api_url: str, offset: int, limit: i
         resp.raise_for_status()
         return resp.json().get("data", [])
     except Exception as e:
-        logger.error(f"❌ Erro ao buscar offset {offset}: {e}")
+        logger.error(f" Erro ao buscar offset {offset}: {e}")
         return None
 
 def validar_e_enriquecer(
@@ -120,19 +127,19 @@ def validar_e_enriquecer(
     ultima_data: Optional[str],
     offset: int,
     ingest_ts: str
-) -> tuple[bool, Optional[str]]:
+) -> Optional[str]:
 
     """Valida a vaga e retorna (válida?, publication_date)."""
 
     pub = job.get("publishedDate")
     if not pub:
-        return False, None
+        return None
 
     # Validar formato da data
     try:
-        data_pub = datetime.fromisoformat(pub.replace('Z', '+00:00'))
+        datetime.fromisoformat(pub.replace('Z', '+00:00'))
     except ValueError:
-        return False, None
+        return None
 
     # Enriquecimento
     job.update({
@@ -142,22 +149,7 @@ def validar_e_enriquecer(
         "_modo": modo,
     })
 
-    # --- regra se tiver ultima_data ---
-    if ultima_data:
-        ultima = datetime.fromisoformat(ultima_data)
-        if data_pub <= ultima:
-            return False, pub
-
-    return True, pub
-
-
-def e_vaga_antiga(pub_date: str, ultima_conhecida: Optional[str]) -> bool:
-
-    """Verifica se vaga é antiga comparada ao checkpoint."""
-
-    if not ultima_conhecida:
-        return False,
-    return pub_date <= ultima_conhecida
+    return pub
 
 
 def salvar_parquet(vagas: list[dict], modo: str) -> tuple[Path, bool]:
@@ -168,7 +160,7 @@ def salvar_parquet(vagas: list[dict], modo: str) -> tuple[Path, bool]:
 
     df_novas = pl.DataFrame(vagas)
     hoje = datetime.now()
-    bronze_dir = Path(f'data/bronze/gupy/year={hoje.year}/month={hoje.month:02d}/day={hoje.day:02d}')
+    bronze_dir = Path(f'data/bronze/gupy/year={hoje.year}/month={hoje.month:02d}')
     bronze_dir.mkdir(parents=True, exist_ok=True)
 
     nome_arquivo = f'vagas_{hoje.strftime("%Y%m%d")}.parquet'
@@ -186,7 +178,6 @@ def salvar_parquet(vagas: list[dict], modo: str) -> tuple[Path, bool]:
 
 
 def coletar_vagas_bronze(modo: str = 'auto') -> dict:
-
     """
     Pipeline de coleta de vagas da Gupy.
 
@@ -198,25 +189,26 @@ def coletar_vagas_bronze(modo: str = 'auto') -> dict:
 
     # Inicialização
     config = Config.from_env()
-    checkpoint_mgr = CheckpointManager(source="gupy")
+    checkpoint_mgr = CheckpointManager(source="gupy_bronze")
     checkpoint = checkpoint_mgr.carregar_checkpoint()
     modo_execucao, ultima_data_conhecida, max_paginas = decidir_modo(modo, checkpoint)
 
-    # Flag para evitar comparação de string no loop
-    e_incremental = modo_execucao == 'incremental'
-
+    e_incremental = (modo_execucao == 'incremental')
 
     # Setup HTTP
     session = requests.Session()
     offset = 0
     paginas = 0
-    vagas = []
-    antigas_consec = 0
-    data_recente = None
+    vagas: list[dict] = []
+
+    antigas_consec = 0          # só métrica
+    data_recente = None         # maior publishedDate (string ISO)
+    encontrou_antiga = False    # se vimos alguma vaga <= ultima_data_conhecida
 
     try:
         tempo_inicio = perf_counter()
-        while paginas < max_paginas:
+        # Respeita max_paginas como safety e max_offset da API
+        while paginas < max_paginas and offset <= config.max_offset:
             jobs = extrair_vagas(session, config.api_url, offset, config.limit, config.timeout)
             if jobs is None:
                 time.sleep(config.sleep_error)
@@ -224,11 +216,43 @@ def coletar_vagas_bronze(modo: str = 'auto') -> dict:
             if not jobs:
                 logger.info("Acabou as vagas disponíveis.")
                 break
+
             ingest_ts = datetime.now().isoformat()
             vagas_novas_pagina = 0
+
             for job in jobs:
-                deve_adicionar, pub = validar_e_enriquecer(job, modo_execucao, ultima_data_conhecida, offset, ingest_ts)
-                print_metrics(
+                # valida e enriquece; se der problema de data, volta None
+                pub = validar_e_enriquecer(
+                    job=job,
+                    modo=modo_execucao,
+                    ultima_data=ultima_data_conhecida,  # hoje não é usada, mas mantida na assinatura
+                    offset=offset,
+                    ingest_ts=ingest_ts,
+                )
+
+                if not pub:
+                    continue
+
+                # atualiza métricas de data
+                data_recente = max(data_recente, pub) if data_recente else pub
+
+                # lógica incremental baseada em string ISO
+                if e_incremental and ultima_data_conhecida:
+                    if pub <= ultima_data_conhecida:
+                        # já chegamos em vaga "antiga" (<= checkpoint)
+                        encontrou_antiga = True
+                        antigas_consec += 1
+                        # não adiciona essa vaga
+                        continue
+                    else:
+                        antigas_consec = 0
+
+                # vaga realmente nova
+                vagas.append(job)
+                vagas_novas_pagina += 1
+
+            # imprime métricas 1x por página
+            print_metrics(
                 paginas=paginas,
                 max_paginas=max_paginas,
                 offset=offset,
@@ -238,25 +262,19 @@ def coletar_vagas_bronze(modo: str = 'auto') -> dict:
                 data_recente=data_recente,
                 tempo_inicio=tempo_inicio,
             )
-                if pub:
-                    data_recente = max(data_recente, pub) if data_recente else pub
 
-                if deve_adicionar:
-                    vagas.append(job)
-                    vagas_novas_pagina += 1
-                    antigas_consec = 0
-                elif e_incremental and pub:
-                    antigas_consec += 1
+            # critério de parada do incremental: já encontrou vagas antigas
+            if e_incremental and encontrou_antiga:
+                logger.info(
+                    "Chegamos em vagas com data <= ultima_data_conhecida. Encerrando incremental."
+                )
+                break
 
-            if e_incremental and vagas_novas_pagina == 0:
-                logger.info(f' Nenhuma vaga nova na página. Encerrando coleta incremental.')
-                break
-            if antigas_consec >= config.max_antigas:
-                logger.info(f' Limite de vagas antigas consecutivas atingido. Encerrando coleta incremental.')
-                break
+            # IMPORTANTE: sempre avançar página e offset aqui
             paginas += 1
             offset += config.limit
             time.sleep(config.sleep_ok)
+
     finally:
         session.close()
 
@@ -264,30 +282,37 @@ def coletar_vagas_bronze(modo: str = 'auto') -> dict:
         logger.info("Nenhuma vaga coletada.")
         return {
             "status": "sucesso",
-            "vagas_coletadas": 0,
-            "arquivo": None,
+            "modo": modo_execucao,
+            "total_vagas": 0,
+            "caminho_bronze": None,
+            "tamanho_mb": 0.0,
             "foi_append": False,
-            "data_recente": None
+            "data_recente": None,
         }
+
     caminho_arquivo, foi_append = salvar_parquet(vagas, modo_execucao)
     tamanho_mb = caminho_arquivo.stat().st_size / (1024 * 1024)
     logger.info(f"Arquivo salvo: {caminho_arquivo} ({tamanho_mb:.2f} MB)")
-    checkpoint_mgr.salvar_checkpoint(ultima_data_publicacao=data_recente
-                                      ,total_vagas=len(vagas)
-                                      ,metadata= {
-                                         "modo": modo_execucao
-                                        ,"paginas": paginas
-                                        ,"arquivo": str(caminho_arquivo)
-                                        ,"foi_append": foi_append
 
-                                      })
+    checkpoint_mgr.salvar_checkpoint(
+        ultima_data_publicacao=data_recente,
+        total_vagas=len(vagas),
+        metadata={
+            "modo": modo_execucao,
+            "paginas": paginas,
+            "arquivo": str(caminho_arquivo),
+            "foi_append": foi_append,
+        },
+    )
+
     return {
         "status": "sucesso",
         "modo": modo_execucao,
         "total_vagas": len(vagas),
         "caminho_bronze": str(caminho_arquivo),
         "tamanho_mb": tamanho_mb,
-        "foi_append": foi_append}
+        "foi_append": foi_append,
+    }
 
 if __name__ == "__main__":
     resultado = coletar_vagas_bronze(modo='auto')

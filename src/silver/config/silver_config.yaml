@@ -1,0 +1,108 @@
+# Configuração das fontes de dados para a camada Silver
+sources:
+  gupy:
+    processor_module: "gupy_silver"
+    bronze_path: "data/bronze/gupy"
+    enabled: true
+
+  # linkedin:
+  #   processor_module: "processors.linkedin_silver"
+  #   bronze_path: "data/bronze/linkedin"
+  #   enabled: false
+
+  # indeed:
+  #   processor_module: "processors.indeed_silver"
+  #   bronze_path: "data/bronze/indeed"
+  #   enabled: false
+
+# Configurações globais
+settings:
+  silver_output_path: "data/silver"
+  compression: "zstd"
+  dedup_column: "id"
+
+  # Skills database (compartilhado entre todas as fontes)
+  skills_tech:
+    - python
+    - java
+    - excel
+    - javascript
+    - typescript
+    - golang
+    - rust
+    - "c++"
+    - "c#"
+    - react
+    - angular
+    - vue
+    - node
+    - express
+    - fastapi
+    - django
+    - flask
+    - sql
+    - postgresql
+    - mysql
+    - mongodb
+    - redis
+    - elasticsearch
+    - aws
+    - azure
+    - gcp
+    - docker
+    - kubernetes
+    - terraform
+    - airflow
+    - spark
+    - kafka
+    - hadoop
+    - databricks
+    - git
+    - jenkins
+    - gitlab
+    - github actions
+    - html
+    - css
+    - sass
+    - tailwind
+    - pandas
+    - numpy
+    - scikit-learn
+    - tensorflow
+    - pytorch
+    - api
+    - rest
+    - graphql
+    - grpc
+    - microserviços
+
+  skills_soft:
+    - comunicação
+    - liderança
+    - trabalho em equipe
+    - proatividade
+    - resolução de problemas
+    - criatividade
+    - adaptabilidade
+    - gestão de tempo
+    - pensamento crítico
+    - colaboração
+
+  niveis:
+    estagio: [estagio, estágio, intern, trainee]
+    junior: [junior, jr, iniciante, entry level]
+    pleno: [pleno, mid level, intermediário, intermediario]
+    senior: [senior, sr, sênior, especialista, expert]
+    lead: [lead, tech lead, staff, principal, arquiteto]
+
+  areas:
+    backend: [backend, back-end, api, servidor, microservices]
+    frontend: [frontend, front-end, react, angular, vue, ui]
+    fullstack: [fullstack, full-stack, full stack]
+    mobile: [mobile, android, ios, react native, flutter]
+    dados: [dados,  analytics, bi, cientista de dados, engenheiro de dados]
+    devops: [devops, sre, infraestrutura, cloud, kubernetes]
+    qa: [qa, quality assurance, teste, tester, automação de testes]
+    seguranca: [segurança, security, cybersecurity, pentest]
+    produto: [produto, product, po, product owner]
+    design: [design, ux, ui/ux, designer]
