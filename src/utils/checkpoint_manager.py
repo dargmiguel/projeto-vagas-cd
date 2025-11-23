@@ -3,9 +3,11 @@ Gerenciador de checkpoint para controle de estado do pipeline
 """
 
 
+import os
 from pathlib import Path
 import logging
 import json
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -31,27 +33,48 @@ class CheckpointManager:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoint_path = self.checkpoint_dir / f"{source}_checkpoint.json"
 
-    def salvar_checkpoint(self, ultima_data_publicacao: str, total_vagas: int, metadata: dict = None):
+    def salvar_checkpoint(self, **kwargs):
         """
-        Salva o checkpoint atual em um arquivo JSON
+        Salva o checkpoint atual de forma atômica.
+
+        Aceita qualquer número de argumentos nomeados, tornando-o flexível
+        para diferentes etapas do pipeline (bronze, silver, etc.).
+
+        Exemplos de uso:
+            salvar_checkpoint(ultima_data_publicacao="...", total_vagas=100)
+            salvar_checkpoint(ultima_data_processada="...", rows_processed=50)
 
         Args:
-            ultima_data_publicacao: Data da última publicação coletada
-            total_vagas: Total de vagas coletadas
-            metadata: Metadados adicionais a serem salvos
+            **kwargs: Dados a serem salvos no checkpoint.
         """
+        if not kwargs:
+            logger.warning("Nenhum dado fornecido para salvar no checkpoint. Operação ignorada.")
+            return
 
+        # Monta o dicionário do checkpoint, garantindo que a fonte seja incluída
+        checkpoint_data = {"source": self.source, **kwargs}
 
-        checkpoint = {
-            "source": self.source,
-            "ultima_data_publicacao": ultima_data_publicacao,
-            "total_vagas": total_vagas,
-            "metadata": metadata or {}
-        }
+        try:
+            # --- Escrita Atômica ---
+            # 1. Cria um arquivo temporário no mesmo diretório do checkpoint final
+            fd, temp_path = tempfile.mkstemp(dir=self.checkpoint_dir, prefix=".tmp_")
+            os.close(fd) # Fecha o descritor de arquivo, vamos usar o Path
 
-        with open(self.checkpoint_path, "w") as f:
-            json.dump(checkpoint, f, indent= 2, ensure_ascii= False)
-        logger.info(f"Checkpoint salvo: {ultima_data_publicacao}, total_vagas: {total_vagas} para a fonte {self.source}")
+            temp_file_path = Path(temp_path)
+
+            # 2. Escreve os dados no arquivo temporário
+            with open(temp_file_path, "w") as f:
+                json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
+
+            # 3. Renomeia o arquivo temporário para o nome final (operação atômica)
+            temp_file_path.replace(self.checkpoint_path)
+
+            logger.info(f"Checkpoint salvo com sucesso para a fonte '{self.source}'.")
+
+        except (IOError, OSError) as e:
+            logger.error(f"Erro de I/O ao salvar o checkpoint para '{self.source}': {e}")
+        except Exception as e:
+            logger.error(f"Erro inesperado ao salvar o checkpoint para '{self.source}': {e}", exc_info=True)
 
     def carregar_checkpoint(self) -> dict | None:
         """
