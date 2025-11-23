@@ -112,7 +112,7 @@ def processar_source(source_name: str,
 
     return{
         "status": "sucesso",
-        "total_vagas_processadas": len(df_silver),
+        "total_vagas_processadas": df_silver.height,
         "arquivo_salvo": str(output_file),
         "tamanho_mb": round(tamanho_mb, 2)
     }

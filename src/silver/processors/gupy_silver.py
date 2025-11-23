@@ -47,7 +47,8 @@ def escolher_area_principal(areas: list[str] | None) -> str | None:
 
     # garante tudo normalizado
     areas_norm = [TextProcessor.normalizar_texto(a) for a in areas if a]
-
+    if not areas_norm:
+        return None
     for alvo in AREAS_PRIORIDADE:
         if alvo in areas_norm:
             return alvo

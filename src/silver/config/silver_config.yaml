@@ -74,7 +74,7 @@ settings:
     - rest
     - graphql
     - grpc
-    - microserviços
+    - microservices
 
   skills_soft:
     - comunicação
@@ -100,7 +100,7 @@ settings:
     frontend: [frontend, front-end, react, angular, vue, ui]
     fullstack: [fullstack, full-stack, full stack]
     mobile: [mobile, android, ios, react native, flutter]
-    dados: [dados,  analytics, bi, cientista de dados, engenheiro de dados]
+    dados: [dados, analytics, bi, cientista de dados, engenheiro de dados]
     devops: [devops, sre, infraestrutura, cloud, kubernetes]
     qa: [qa, quality assurance, teste, tester, automação de testes]
     seguranca: [segurança, security, cybersecurity, pentest]
