@@ -24,18 +24,18 @@ def carregar_bronze(bronze_path: str, data: Optional[datetime] = None) -> Option
     if data is None:
         data = datetime.now()
 
-    path_pattern = f"{bronze_path}/year={data.year}/month={data.month:02d}/vagas_{data.strftime('%Y%m%d')}.parquet"
-    logger.info(f"Carregando dados bronze de: {path_pattern}")
-
     try:
-        lf = pl.scan_parquet(path_pattern)
-        lf_unique = (lf.sort("_horario_ingestao", descending=True).unique(subset=["id"], keep="first"))
-        df = lf_unique.collect()
+        df = pl.scan_delta(bronze_path)\
+            .filter(pl.col("_partition_date") == data.date())\
+            .collect()
+        df_unique = df.sort("_horario_ingestao", descending=True).unique(subset=["id"], keep="first")
+
         if df.is_empty():
             logger.warning(f"Nenhum dado encontrado na camada bronze para a data {data.strftime('%Y-%m-%d')}.")
             return None
-        logger.info(f"Dados bronze carregados com {df.height} registros únicos.")
-        return df
+
+        logger.info(f"Dados bronze carregados com {df_unique.height} registros únicos.")
+        return df_unique
     except FileNotFoundError:
         logger.warning(
             f"Arquivo não encontrado para a data {data.strftime('%Y-%m-%d')}. "
@@ -70,49 +70,53 @@ def processar_source(source_name: str,
     try:
         module_path = f'.{source_config["processor_module"]}'
         processador_module = importlib.import_module(module_path, package='src.silver.processors')
-        processador_func = processador_module.processar_vagas
+        processar = processador_module.processar_vagas
     except (ImportError, AttributeError) as e:
         logger.error(f"Erro ao importar módulo de processamento para a fonte {source_name}: {e}")
         return {"status": "error", "reason": "import_error"}
 
     # Carrega dados bronze
     df_bronze = carregar_bronze(source_config["bronze_path"], data)
-    if df_bronze is None or len(df_bronze) == 0:
+    if df_bronze is None or df_bronze.is_empty():
         return {"status": "no_data", "reason": "no_bronze_data"}
+
 
     # Processa os dados usando a função do processador
     try:
-        df_silver = processador_func(df_bronze, global_config['settings'])
+        df_silver = processar(df_bronze, global_config['settings'])
+
     except Exception as e:
         logger.error(f"Erro ao processar dados para a fonte {source_name}: {e}")
         return {"status": "error", "reason": "processing_error"}
 
-    if len(df_silver) == 0:
+    if df_silver is None or df_silver.is_empty() :
         logger.warning(f"Nenhum dado processado para a fonte {source_name}.")
         return {"status": "no_data", "reason": "no_processed_data"}
 
     # Salva os dados processados
-    data_dos_dados = data or datetime.now()
 
-    output_dir = Path(global_config['settings']['silver_output_path']) / source_name
-    output_dir = output_dir / f"year={data_dos_dados.year}/month={data_dos_dados.month:02d}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    silver_root = Path(global_config['settings']['silver_output_path']) / source_name
+    silver_root.mkdir(parents=True, exist_ok=True)
 
-    output_file = output_dir / f'vagas_{data_dos_dados.strftime("%Y%m%d")}.parquet'
-    df_silver.write_parquet(output_file)
 
-    tamanho_mb = output_file.stat().st_size / (1024 * 1024)
-    # checkpoint_mgr.salvar_checkpoint(
-    #     data_processamento = data_dos_dados.isoformat(),
-    #     ultima_data_processada = datetime.now().isoformat(),
-    #     total_vagas_processadas = len(df_silver),
-    #     metadata = {"arquivo": str(output_file), "tamanho_mb": round(tamanho_mb, 2)}
-    # )
-    logger.info(f"Processamento concluído para a fonte {source_name}. Dados salvos em {output_file} ({tamanho_mb:.2f} MB).")
+    overwrite_flag = global_config["settings"].get("silver_overwrite", False)
+
+    write_mode = "overwrite" if overwrite_flag else "append"
+    logger.info(f"Modo de escrita Delta (silver): {write_mode}")
+
+    df_silver.write_delta(
+        str(silver_root),
+        mode=write_mode,
+        delta_write_options={
+            "schema_mode": "merge",
+            "partition_by": ["ano_publicacao", "mes_publicacao"]
+        }
+
+    )
+
+    logger.info(f"Processamento concluído para a fonte {source_name}. -> {df_silver.height} vagas.")
 
     return{
         "status": "sucesso",
         "total_vagas_processadas": df_silver.height,
-        "arquivo_salvo": str(output_file),
-        "tamanho_mb": round(tamanho_mb, 2)
     }

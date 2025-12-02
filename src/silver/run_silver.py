@@ -1,76 +1,125 @@
-
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
-
 from typing import Optional
 import yaml
 
-from src.silver.processors.silver_processor import processar_source
+from src.silver.processors.silver_processor import carregar_bronze, processar_source
 
-
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
 def carregar_config() -> dict:
-    """Carrega a configuração do pipeline a partir do arquivo YAML.
-
-    Returns:
-        dict: Configuração carregada.
-    """
-    config_path = Path(__file__).parent.parent / "silver" /  "config" / "silver_config.yaml"
+    config_path = Path(__file__).parent.parent / "silver" / "config" / "silver_config.yaml"
     try:
-        with open(config_path, 'r', encoding='utf-8') as file:
-            config = yaml.safe_load(file)
-        return config
-    except FileNotFoundError:
-        logger.error(f"Arquivo de configuração não encontrado: {config_path}")
-        raise
-    except yaml.YAMLError as e:
-        logger.error(f"Erro ao carregar o arquivo de configuração: {e}")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        logger.error(f"Erro ao carregar config: {e}")
         raise
 
-def processar_silver(data: Optional[datetime] = None):
-    """Processa todas as fontes habilitadas para camada silver"""
 
-    logger.info("Iniciando processamento da camada silver...")
+def main():
+    parser = argparse.ArgumentParser(description="Processa camada Silver")
+    parser.add_argument("--date", type=str, help="Data específica (YYYY-MM-DD)")
+    parser.add_argument("--full", action="store_true", help="Força overwrite em todas as fontes")
+    parser.add_argument("--data-inicio", type=str, help="Data inicial para --full (YYYY-MM-DD)")
+    args = parser.parse_args()
+
     config = carregar_config()
-    resultados = {}
-    for source_name, source_config in config.get("sources", {}).items():
-        try:
-            resultado = processar_source(source_name, source_config, config, data)
-            resultados[source_name] = resultado
-        except Exception as e:
-            logger.error(f"Erro ao processar a fonte {source_name}: {e}")
-            resultados[source_name] = {"status": "error", "error": str(e)}
+    config.setdefault("settings", {})
 
-    logger.info("Resumo do processamento silver: \t")
-    for source, resultado in resultados.items():
-        status = resultado.get("status", "desconhecido")
-        total = resultado.get("total_vagas_processadas", 0)
-        logger.info(f"Fonte: {source} | Status: {status} | Total Processadas: {total}")
-    return resultados
+    config["settings"]["silver_overwrite"] = args.full
+    logger.info(f"Modo full_reprocess: {args.full}")
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--date",
-        help="Data para processar no formato YYYY-MM-DD. Se não fornecido, usa a data atual.",
-        default=None,
+    if args.full:
+        inicio_str = args.data_inicio or "2025-11-01"
+        inicio = datetime.strptime(inicio_str, "%Y-%m-%d")
+        datas = [(inicio + timedelta(days=i)) for i in range((datetime.now() - inicio).days + 1)]
+        logger.info(f"Full reprocess ativado → {len(datas)} dias desde {inicio_str}")
+    else:
+        data_especifica = datetime.strptime(args.date, "%Y-%m-%d") if args.date else datetime.now()
+        datas = [data_especifica]
+        logger.info(f"Processamento normal → {data_especifica.date()}")
 
-    )
-    return parser.parse_args()
+    if args.full:
+        import polars as pl
+        import importlib
+
+        todos_silvers = {}
+        for dt in datas:
+            logger.info(f"Coletando bronze → {dt.date()}")
+            for source_name, source_cfg in config.get("sources", {}).items():
+                if not source_cfg.get("enabled", True):
+                    continue
+                try:
+                    df_bronze = carregar_bronze(source_cfg["bronze_path"], dt)
+                    if df_bronze is not None and not df_bronze.is_empty():
+                        logger.info(f"{source_name}: {df_bronze.height} linhas bronze")
+
+                        module_path = f'.{source_cfg["processor_module"]}'
+                        processador_module = importlib.import_module(module_path, package='src.silver.processors')
+                        processar = processador_module.processar_vagas
+
+                        df_silver = processar(df_bronze, config['settings'])
+
+                        if source_name not in todos_silvers:
+                            todos_silvers[source_name] = []
+                        todos_silvers[source_name].append(df_silver)
+                except Exception as e:
+                    logger.error(f"Erro no full reprocess {source_name}: {e}")
+
+        for source_name, silvers in todos_silvers.items():
+            if silvers:
+                df_consolidado = (
+                    pl.concat(silvers, how="vertical_relaxed")
+                    .sort("_horario_ingestao", descending=True)
+                    .unique(subset=["vaga_id"], keep="first")
+                )
+                logger.info(f"{source_name}: {len(silvers)} batches → {df_consolidado.height} vagas únicas")
+
+                silver_root = Path(config['settings']['silver_output_path']) / source_name
+                silver_root.mkdir(parents=True, exist_ok=True)
+
+                df_consolidado.write_delta(
+                    str(silver_root),
+                    mode="overwrite",
+                    delta_write_options={
+                        "schema_mode": "overwrite",
+                        "partition_by": ["ano_publicacao", "mes_publicacao"]
+                    }
+                )
+                logger.info(f"{source_name}: {df_consolidado.height} vagas gravadas")
+    else:
+        for dt in datas:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"PROCESSANDO SILVER → {dt.date()} | full_reprocess={args.full}")
+            logger.info(f"{'='*60}")
+
+            for source_name, source_cfg in config.get("sources", {}).items():
+                if not source_cfg.get("enabled", True):
+                    logger.info(f"Fonte {source_name} desabilitada → pulando")
+                    continue
+
+                try:
+                    logger.info(f"\nProcessando fonte: {source_name}")
+                    resultado = processar_source(source_name, source_cfg, config, dt)
+                    logger.info(f"Resultado: {resultado}")
+                    status = resultado.get("status", "erro")
+                    logger.info(f"Fonte {source_name} processada com status: {status}")
+                    total = resultado.get("total_vagas_processadas", 0)
+                    logger.info(f"{source_name} → {status} ({total} vagas)")
+                except Exception as e:
+                    logger.error(f"Erro crítico na fonte {source_name}: {e}")
+
+    logger.info("\nProcessamento Silver concluído!")
+
+
 
 if __name__ == "__main__":
-    args = parse_args()
-    data_ref: Optional[datetime] = None
-    if args.date:
-        try:
-            data_ref = datetime.strptime(args.date, "%Y-%m-%d")
-        except ValueError:
-            logger.error("Formato de data inválido. Use YYYY-MM-DD.")
-            exit(1)
-    processar_silver(data_ref)
+    main()
