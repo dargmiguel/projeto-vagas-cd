@@ -2,3 +2,6 @@
 pycache/
 venv/
 data/
+logs/
+*.cpython-311.pyc
+__pycache__/

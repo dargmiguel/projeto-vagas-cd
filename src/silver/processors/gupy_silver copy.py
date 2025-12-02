@@ -16,18 +16,6 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-AREAS_PRIORIDADE = [
-    "dados",
-    "backend",
-    "frontend",
-    "fullstack",
-    "mobile",
-    "devops",
-    "qa",
-    "produto",
-    "design",
-    "seguranca",
-]
 
 # Padrão para cargos de dados (titulo/descricao)
 PADRAO_CARGO_DADOS = (
@@ -36,25 +24,6 @@ PADRAO_CARGO_DADOS = (
     r"data engineer|data scientist|data analyst)"
 )
 
-
-def escolher_area_principal(areas: list[str] | None) -> str | None:
-    """
-    Recebe a lista de áreas extraídas e devolve uma área principal.
-    Usa uma ordem de prioridade simples.
-    """
-    if areas is None or not isinstance(areas, list) or len(areas) == 0:
-        return None
-
-    # garante tudo normalizado
-    areas_norm = [TextProcessor.normalizar_texto(a) for a in areas if a]
-    if not areas_norm:
-        return None
-    for alvo in AREAS_PRIORIDADE:
-        if alvo in areas_norm:
-            return alvo
-
-    # fallback: primeira área da lista
-    return areas_norm[0]
 
 
 class TextProcessor:
@@ -112,32 +81,63 @@ class FeatureExtractor:
 
         # Níveis - FLATTEN das listas
         niveis_dict = config.get("niveis", {})
-        niveis_unicos = set()
-        for nivel_lista in niveis_dict.values():
-            if isinstance(nivel_lista, list):
-                niveis_unicos.update([TextProcessor.normalizar_texto(n) for n in nivel_lista if n])
-            else:
-                niveis_unicos.add(TextProcessor.normalizar_texto(nivel_lista))
+        self.nivel_regex_map: Dict[str, str] = {}
 
-        escaped_niveis = sorted([re.escape(n) for n in niveis_unicos], key=len, reverse=True)
-        self.nivel_pattern = r'\b(' + '|'.join(escaped_niveis) + r')\b' if escaped_niveis else r"$.^"
+        for nivel, termos in niveis_dict.items():
+            if isinstance(termos, list) and termos:
+                # 1. Normalizar e escapar termos
+                normalized_and_escaped = [re.escape(TextProcessor.normalizar_texto(t)) for t in termos if t]
+
+                # 2. Separar frases de palavras únicas para aplicação correta de \b
+                phrases = [t for t in normalized_and_escaped if ' ' in t]
+                words = [t for t in normalized_and_escaped if ' ' not in t]
+
+                # 3. Construir o padrão (priorizar frases, usar \b nas palavras)
+                regex_list = phrases + [r'\b' + w + r'\b' for w in words]
+
+                # 4. Adicionar a flag (?i) para case-insensitive e salvar no mapa
+                self.nivel_regex_map[nivel] = r'(?i)' + '|'.join(regex_list)
+
+        # O self.nivel_pattern antigo que extraía apenas o primeiro match é removido/desativado,
+        # pois agora usaremos o self.nivel_regex_map na função aplicar.
+        self.nivel_pattern = r"$.^"
+        logger.debug(f"Regex de Níveis gerado: {list(self.nivel_regex_map.keys())}")
 
         # Áreas - FLATTEN das listas
+                # Áreas — mapa de regex por categoria
         areas_dict = config.get("areas", {})
-        areas_unicas = set()
-        for area_lista in areas_dict.values():
-            if isinstance(area_lista, list):
-                areas_unicas.update([TextProcessor.normalizar_texto(a) for a in area_lista if a])
+        self.area_regex_map = {}
+
+        for categoria, termos in areas_dict.items():
+            # Flatten
+            if isinstance(termos, list):
+                termos_norm = [TextProcessor.normalizar_texto(t) for t in termos if t]
             else:
-                areas_unicas.add(TextProcessor.normalizar_texto(area_lista))
+                termos_norm = [TextProcessor.normalizar_texto(termos)]
 
-        escaped_areas = sorted([re.escape(a) for a in areas_unicas], key=len, reverse=True)
-        self.area_pattern = r'\b(' + '|'.join(escaped_areas) + r')\b' if escaped_areas else r"$.^"
+            # Escape + ordenar maior → menor (melhor match)
+            termos_esc = sorted([re.escape(t) for t in termos_norm], key=len, reverse=True)
 
-        logger.info("✅ Feature extractor preparado.")
+            # Criar regex único da categoria
+            # Observação: frases não levam \b, palavras levam
+            frases  = [t for t in termos_esc if " " in t]
+            palavras = [rf"\b{t}\b" for t in termos_esc if " " not in t]
+
+            regex_final = r"(?i)(" + "|".join(frases + palavras) + r")"
+            self.area_regex_map[categoria] = regex_final
+
+        # Pré-gerar expressões Polars
+        self.area_exprs = [
+            pl.when(pl.col("texto_analise").str.contains(regex))
+            .then(pl.lit([categoria]))
+            .otherwise(pl.lit([]))
+            for categoria, regex in self.area_regex_map.items()
+        ]
+
+        logger.info("Feature extractor preparado.")
 
     def aplicar(self, lf: pl.LazyFrame) -> pl.LazyFrame:
-        logger.info("🔄 Aplicando extração de features...")
+        logger.info("Aplicando extração de features...")
 
         # 1. Preparação do texto
         lf = lf.with_columns([
@@ -152,9 +152,27 @@ class FeatureExtractor:
         lf = lf.with_columns([
             pl.col('texto_analise').str.extract_all(self.tech_pattern).list.unique().alias('skills_tech'),
             pl.col('texto_analise').str.extract_all(self.soft_pattern).list.unique().alias('skills_soft'),
-            pl.col('texto_analise').str.extract(self.nivel_pattern, group_index=0).alias('nivel'),
-            pl.col('texto_analise').str.extract_all(self.area_pattern).list.unique().alias('areas'),
+            pl.when(pl.col('texto_analise').str.contains(self.nivel_regex_map.get('lead', r"$.^")))
+            .then(pl.lit(5))
+
+            .when(pl.col('texto_analise').str.contains(self.nivel_regex_map.get('senior', r"$.^")))
+            .then(pl.lit(4))
+
+            .when(pl.col('texto_analise').str.contains(self.nivel_regex_map.get('pleno', r"$.^")))
+            .then(pl.lit(3))
+
+            .when(pl.col('texto_analise').str.contains(self.nivel_regex_map.get('junior', r"$.^")))
+            .then(pl.lit(2))
+
+            .when(pl.col('texto_analise').str.contains(self.nivel_regex_map.get('estagio', r"$.^")))
+            .then(pl.lit(1))
+
+            .otherwise(pl.lit(0))
+            .cast(pl.Int8)
+            .alias('nivel'),
+            pl.concat_list(self.area_exprs).list.unique().alias("areas"),
         ])
+
 
         # 3. Colunas derivadas
 
@@ -169,26 +187,10 @@ class FeatureExtractor:
             .alias('areas'),
         ])
 
-        # 3.2 área principal (macro-categoria)
-        lf = lf.with_columns([
-            pl.col("areas")
-            .map_elements(escolher_area_principal, return_dtype=pl.Utf8)
-            .alias("area_principal")
-        ])
 
-        # 3.3 flags is_tech / is_dados + modalidade/localização
-        # 3.3 flags is_tech / is_dados + modalidade/localização
         lf = lf.with_columns([
-            # Flag is_tech: área principal de tech OU tem skills_tech
-            (
-                pl.col("area_principal").is_in([
-                    "backend", "frontend", "fullstack",
-                    "mobile", "dados", "devops",
-                    "qa", "produto", "design", "seguranca"
-                ])
-                | (pl.col("skills_tech").list.len() > 0)
-            )
-            .alias("is_tech"),
+            # Flag is_tech: se tiver qualquer skill técnica
+            (pl.col("skills_tech").list.len() > 0).alias("is_tech"),
 
             # Flag is_dados mais restritiva
             pl.when(
@@ -214,10 +216,11 @@ class FeatureExtractor:
             .alias('localizacao'),
         ])
 
+
         # 4. Renomear colunas
         lf = lf.with_columns([
             pl.col('id').cast(pl.Utf8).alias('vaga_id'),
-            pl.col('companyId').alias('company_id'),
+            pl.col('companyId').cast(pl.Int64).alias('company_id'),
             pl.col('name').alias('titulo'),
             pl.col('careerPageName').alias('empresa'),
             pl.col('careerPageLogo').alias('empresa_logo'),
@@ -225,29 +228,29 @@ class FeatureExtractor:
             pl.col('city').alias('cidade'),
             pl.col('state').alias('estado'),
             pl.col('country').alias('pais'),
-            pl.col('publishedDate').alias('data_publicacao'),
-            pl.col('applicationDeadline').alias('data_expiracao'),
+            pl.col('publishedDate').str.to_datetime(time_unit='ms',time_zone='UTC', strict=False).alias('data_publicacao'),
+            pl.col('applicationDeadline').str.to_date(format='%Y-%m-%d', strict=False).alias('data_expiracao'),
             pl.col('jobUrl').alias('url'),
             pl.col('disabilities').alias('aceita_pcd'),
             pl.col('isRemoteWork').alias('is_remote_work'),
             pl.col('workplaceType').alias('workplace_type'),
-            pl.lit(datetime.now().isoformat()).alias('data_processamento'),
+            pl.lit(datetime.now().isoformat()).str.to_datetime(time_unit ='ms', time_zone='UTC', strict=False).alias('data_processamento'),
             pl.lit('gupy').alias('fonte'),
         ])
 
 
         # 5. Seleciona colunas finais
         colunas_finais = [
-                'vaga_id', 'company_id', 'titulo', 'empresa', 'empresa_logo', 'empresa_url',
-                'descricao_limpa', 'cidade', 'estado', 'pais', 'localizacao',
-                'modalidade', 'workplace_type', 'is_remote_work',
-                'nivel', 'areas', 'area_principal',
-                'skills_tech', 'skills_soft', 'total_skills',
-                'is_tech', 'is_dados',
-                'url',
-                'data_publicacao', 'data_expiracao', 'aceita_pcd',
-                'data_processamento', 'fonte',
-            ]
+            'vaga_id', 'company_id', 'titulo', 'empresa', 'empresa_logo', 'empresa_url',
+            'descricao_limpa', 'cidade', 'estado', 'pais', 'localizacao',
+            'modalidade', 'workplace_type', 'is_remote_work',
+            'nivel', 'areas',
+            'skills_tech', 'skills_soft', 'total_skills',
+            'is_tech', 'is_dados',
+            'url',
+            'data_publicacao', 'data_expiracao', 'aceita_pcd',
+            'data_processamento', 'fonte',
+        ]
         lf = lf.select(colunas_finais)
 
         logger.info("✅ Extração de features concluída.")

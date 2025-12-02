@@ -1,319 +1,272 @@
+import argparse
+import logging
+import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
-import logging
 from pathlib import Path
-import sys
+from typing import Literal, Optional, List
+from time import perf_counter
+
 import requests
-import time
-
 import polars as pl
-from typing import Optional
-
 from dotenv import load_dotenv
 import os
 
 from src.utils.checkpoint_manager import CheckpointManager
 
 # Configurar logging
-Path("logs").mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
-    format='{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("logs/bronze_gupy.log")
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
+# ====================== 1. SCHEMA & CONFIG ======================
 
-@dataclass(frozen = True)
+BRONZE_SCHEMA = {
+    "id": pl.String,
+    "companyId": pl.Int64,
+    "name": pl.String,
+    "description": pl.String,
+    "careerPageId": pl.Int64,
+    "careerPageName": pl.String,
+    "careerPageLogo": pl.String,
+    "careerPageUrl": pl.String,
+    "type": pl.String,
+    "publishedDate": pl.String,
+    "applicationDeadline": pl.String,
+    "isRemoteWork": pl.Boolean,
+    "city": pl.String,
+    "state": pl.String,
+    "country": pl.String,
+    "jobUrl": pl.String,
+    "badges": pl.List(pl.String),
+    "workplaceType": pl.String,
+    "disabilities": pl.Boolean,
+    "_horario_ingestao": pl.Datetime,
+    "_source": pl.String,
+    "_offset": pl.Int64,
+    "_modo": pl.String,
+    "_partition_date": pl.Date,
+}
+
+@dataclass(frozen=True)
 class Config:
-
-    """Constantes de configuração para o scraper"""
-
     api_url: str
     limit: int = 100
-    max_antigas: int = 10
+    max_antigas: int = 10  # Para incremental: quantas vagas antigas seguidas para parar
     sleep_ok: int = 2
     sleep_error: int = 10
-    max_paginas_full: int = 50
+    max_paginas_full: int = 99
     max_paginas_incremental: int = 50
     timeout: int = 30
-    max_offset: int = 9900
-
+    max_offset: int = 9900  # Limite da API Gupy
 
     @classmethod
     def from_env(cls):
         load_dotenv()
-        api_url = os.getenv('GUPY_API')
+        api_url = os.getenv("GUPY_API")
+        if not api_url:
+            raise ValueError("A variável de ambiente GUPY_API não está definida.")
         return cls(api_url=api_url)
 
+# ====================== 2. HELPERS (COLETA) ======================
 
-# Helpers
-from time import perf_counter
-
-def print_metrics(
-    paginas,
-    max_paginas,
-    offset,
-    total_vagas,
-    novas_pagina,
-    antigas_consec,
-    data_recente,
-    tempo_inicio
-):
-    duracao = perf_counter() - tempo_inicio
+def print_metrics(paginas, max_paginas, offset, total_vagas, novas_pagina, antigas, data_recente, inicio):
+    duracao = perf_counter() - inicio
     vel = duracao / (paginas + 1) if paginas > 0 else duracao
-
-    bloco = f"""
-=======================================================
-📊 Gupy Scraper — Métricas em tempo real
-Página: {paginas+1} / {max_paginas}
-Offset: {offset}
-Vagas coletadas: {total_vagas}
-Vagas novas nesta página: {novas_pagina}
-Vagas antigas consecutivas: {antigas_consec}
-Última data vista: {data_recente}
-Tempo total: {duracao:.1f}s
-Velocidade média: {vel:.2f} s/página
--------------------------------------------------------
-"""
-
-    # limpa bloco anterior (altura igual ao número de linhas)
-    linhas = bloco.count("\n")
-    sys.stdout.write("\033[F" * linhas)  # move cursor pra cima
-    sys.stdout.write(bloco)
+    # \r faz o print sobrescrever a linha anterior (efeito visual de carregamento)
+    msg = (
+        f"Pg: {paginas+1}/{max_paginas} | Off: {offset} | "
+        f"Buffer: {total_vagas} (+{novas_pagina}) | "
+        f"Consec. Antigas: {antigas} | Data Recente: {data_recente} | {vel:.2f}s/pg"
+    )
+    sys.stdout.write(f"\r{msg}")
     sys.stdout.flush()
 
-def decidir_modo(modo: str, checkpoint: Optional[dict]) -> tuple[str, Optional[str], int]:
-
-    """Decide o modo de execução do scraper"""
-
-    if modo == 'auto':
-        if checkpoint is None:
-            logger.info("Full load inicial")
-            return 'full', None , Config.from_env().max_paginas_full
-        logger.info(f" Incremental: Desde {checkpoint['ultima_data_publicacao']}")
-        return 'incremental', checkpoint['ultima_data_publicacao'], Config.from_env().max_paginas_incremental
-    if modo == 'full':
-        logger.info(" Full load solicitado")
-        return 'full', None, Config.from_env().max_paginas_full
-    if checkpoint is None:
-        raise RuntimeError("Checkpoint necessário para modo incremental")
-
-
-    logger.info(f" Incremental solicitado: Desde {checkpoint['ultima_data_publicacao']}")
-    return 'incremental', checkpoint['ultima_data_publicacao'], Config.from_env().max_paginas_incremental
-
-def extrair_vagas(session: requests.Session, api_url: str, offset: int, limit: int, timeout: int ) -> Optional[list]:
-
-    """Faz request à API."""
-
+def extrair_vagas(session: requests.Session, api_url: str, offset: int, limit: int, timeout: int) -> Optional[List[dict]]:
+    """Faz a request para a API da Gupy."""
     try:
         resp = session.get(
             f"{api_url}?limit={limit}&offset={offset}",
-            timeout=timeout,
+            timeout=timeout
         )
         resp.raise_for_status()
         return resp.json().get("data", [])
     except Exception as e:
-        logger.error(f" Erro ao buscar offset {offset}: {e}")
+        logger.error(f"\nErro API (offset {offset}): {e}")
         return None
 
-def validar_e_enriquecer(
-    job: dict,
-    modo: str,
-    ultima_data: Optional[str],
-    offset: int,
-    ingest_ts: str
-) -> Optional[str]:
-
-    """Valida a vaga e retorna (válida?, publication_date)."""
-
+def validar_e_enriquecer(job: dict, modo: str, offset: int) -> Optional[dict]:
+    """Valida data e adiciona as colunas de metadados."""
     pub = job.get("publishedDate")
     if not pub:
         return None
 
-    # Validar formato da data
+    # Valida se a data é parseável (segurança)
     try:
-        datetime.fromisoformat(pub.replace('Z', '+00:00'))
+        datetime.fromisoformat(pub.replace("Z", "+00:00"))
     except ValueError:
         return None
 
-    # Enriquecimento
+    agora = datetime.now()
+
+    # AQUI ESTÁ O SEGREDO: Criamos as duas colunas
     job.update({
-        "_horario_ingestao": ingest_ts,
+        "_horario_ingestao": agora,          # Datetime completo
+        "_partition_date": agora.date(),     # Apenas a data (para a pasta)
         "_source": "gupy",
         "_offset": offset,
         "_modo": modo,
     })
+    return job
 
-    return pub
+# ====================== 3. SALVAR EM DELTA ======================
 
+def salvar_bronze_delta(vagas: list[dict], modo_pipeline: str) -> Path:
+    """Salva os dados em formato Delta Lake."""
+    base_path = Path("data/bronze_delta/gupy")
 
-def salvar_parquet(vagas: list[dict], modo: str) -> tuple[Path, bool]:
+    if not vagas:
+        return base_path
 
-    """Salva as vagas em um arquivo Parquet.
-    Faz append no arquivo do dia se existir.
-    Retorna (caminho_arquivo, foi_append)."""
+    df = pl.DataFrame(vagas, schema=BRONZE_SCHEMA, orient="row")
 
-    df_novas = pl.DataFrame(vagas)
-    hoje = datetime.now()
-    bronze_dir = Path(f'data/bronze/gupy/year={hoje.year}/month={hoje.month:02d}')
-    bronze_dir.mkdir(parents=True, exist_ok=True)
-
-    nome_arquivo = f'vagas_{hoje.strftime("%Y%m%d")}.parquet'
-    caminho_arquivo = bronze_dir / nome_arquivo
-
-    if caminho_arquivo.exists():
-        df_existente = pl.read_parquet(caminho_arquivo)
-        df_combinado = pl.concat([df_existente, df_novas])
-        df_combinado.write_parquet(caminho_arquivo)
-        return caminho_arquivo, True
-
-    df_novas.write_parquet(caminho_arquivo)
-    logger.info(f" Novo arquivo : {len(vagas)} vagas salvas ")
-    return caminho_arquivo, False
+    base_path.mkdir(parents=True, exist_ok=True)
 
 
-def coletar_vagas_bronze(modo: str = 'auto') -> dict:
-    """
-    Pipeline de coleta de vagas da Gupy.
+    modo_escrita: Literal["append", "overwrite"] = "overwrite" if modo_pipeline == "full" else "append"
 
-    Args:
-        modo (str): 'auto', 'full' ou 'incremental'.
-    Returns:
-        dict: Estatísticas da execução.
-    """
+    logger.info(f"\nSalvando {len(df)} vagas em Delta ({modo_escrita})...")
 
-    # Inicialização
+    df.write_delta(
+        str(base_path),
+        mode=modo_escrita,
+        # Particionamento por DIA para evitar excesso de arquivos
+        delta_write_options={
+            "schema_mode": "merge",  # Aceita colunas novas no futuro
+            "partition_by": ["_partition_date"],
+        }
+    )
+    return base_path
+
+# ====================== 4. CORE PIPELINE ======================
+
+def decidir_modo(modo: str, checkpoint: dict | None) -> tuple[str, str | None, int]:
     config = Config.from_env()
-    checkpoint_mgr = CheckpointManager(source="gupy_bronze")
-    checkpoint = checkpoint_mgr.carregar_checkpoint()
-    modo_execucao, ultima_data_conhecida, max_paginas = decidir_modo(modo, checkpoint)
 
-    e_incremental = (modo_execucao == 'incremental')
+    if modo == "full":
+        return "full", None, config.max_paginas_full
 
-    # Setup HTTP
+    # Se for auto e não tiver checkpoint, força full
+    if modo == "auto" and not checkpoint:
+        logger.info("Sem checkpoint anterior. Iniciando FULL LOAD.")
+        return "full", None, config.max_paginas_full
+
+    # Incremental
+    ultima_data = checkpoint.get("ultima_data_publicacao")
+    logger.info(f"Iniciando INCREMENTAL a partir de: {ultima_data}")
+    return "incremental", ultima_data, config.max_paginas_incremental
+
+def coletar_vagas_bronze(modo: str = "auto"):
+    # Setup
+    config = Config.from_env()
+    ckpt_mgr = CheckpointManager(source="gupy_bronze")
+    checkpoint = ckpt_mgr.carregar_checkpoint()
+
+    modo_exec, ultima_data_known, max_paginas = decidir_modo(modo, checkpoint)
+    is_incremental = (modo_exec == "incremental")
+
     session = requests.Session()
+    vagas_buffer = []
+
+    # Estado do Loop
     offset = 0
     paginas = 0
-    vagas: list[dict] = []
+    antigas_consec = 0
+    data_recente = None
+    stop_signal = False
+    inicio = perf_counter()
 
-    antigas_consec = 0          # só métrica
-    data_recente = None         # maior publishedDate (string ISO)
-    encontrou_antiga = False    # se vimos alguma vaga <= ultima_data_conhecida
+    logger.info(f"Iniciando coleta (Modo: {modo_exec})...")
 
     try:
-        tempo_inicio = perf_counter()
-        # Respeita max_paginas como safety e max_offset da API
         while paginas < max_paginas and offset <= config.max_offset:
             jobs = extrair_vagas(session, config.api_url, offset, config.limit, config.timeout)
-            if jobs is None:
+
+            if jobs is None: # Erro API
                 time.sleep(config.sleep_error)
                 continue
-            if not jobs:
-                logger.info("Acabou as vagas disponíveis.")
+
+            if not jobs: # Lista vazia = fim
+                logger.info("\nAPI não retornou mais vagas.")
                 break
 
-            ingest_ts = datetime.now().isoformat()
-            vagas_novas_pagina = 0
+            novas_nesta_pg = 0
 
             for job in jobs:
-                # valida e enriquece; se der problema de data, volta None
-                pub = validar_e_enriquecer(
-                    job=job,
-                    modo=modo_execucao,
-                    ultima_data=ultima_data_conhecida,  # hoje não é usada, mas mantida na assinatura
-                    offset=offset,
-                    ingest_ts=ingest_ts,
-                )
+                job_processed = validar_e_enriquecer(job, modo_exec, offset)
+                if not job_processed: continue
 
-                if not pub:
-                    continue
+                pub_date = job_processed['publishedDate']
 
-                # atualiza métricas de data
-                data_recente = max(data_recente, pub) if data_recente else pub
+                # Rastreia data mais recente vista nesta execução
+                if data_recente is None or pub_date > data_recente:
+                    data_recente = pub_date
 
-                # lógica incremental baseada em string ISO
-                if e_incremental and ultima_data_conhecida:
-                    if pub <= ultima_data_conhecida:
-                        # já chegamos em vaga "antiga" (<= checkpoint)
-                        encontrou_antiga = True
-                        antigas_consec += 1
-                        # não adiciona essa vaga
-                        continue
-                    else:
-                        antigas_consec = 0
+                # Lógica de Parada Incremental
+                if is_incremental and ultima_data_known and pub_date <= ultima_data_known:
+                    antigas_consec += 1
+                    if antigas_consec >= config.max_antigas:
+                        stop_signal = True
+                        break # Sai do loop de vagas
+                    continue # Ignora vaga velha, mas continua vendo a página
+                else:
+                    antigas_consec = 0 # Reset se achar uma nova
 
-                # vaga realmente nova
-                vagas.append(job)
-                vagas_novas_pagina += 1
+                vagas_buffer.append(job_processed)
+                novas_nesta_pg += 1
 
-            # imprime métricas 1x por página
-            print_metrics(
-                paginas=paginas,
-                max_paginas=max_paginas,
-                offset=offset,
-                total_vagas=len(vagas),
-                novas_pagina=vagas_novas_pagina,
-                antigas_consec=antigas_consec,
-                data_recente=data_recente,
-                tempo_inicio=tempo_inicio,
-            )
+            # Feedback visual
+            print_metrics(paginas, max_paginas, offset, len(vagas_buffer), novas_nesta_pg, antigas_consec, data_recente, inicio)
 
-            # critério de parada do incremental: já encontrou vagas antigas
-            if e_incremental and encontrou_antiga:
-                logger.info(
-                    "Chegamos em vagas com data <= ultima_data_conhecida. Encerrando incremental."
-                )
+            if stop_signal:
+                logger.info("\nLimite incremental atingido (vagas antigas encontradas).")
                 break
 
-            # IMPORTANTE: sempre avançar página e offset aqui
             paginas += 1
             offset += config.limit
             time.sleep(config.sleep_ok)
 
+    except KeyboardInterrupt:
+        logger.warning("\nInterrompido pelo usuário. Salvando o que foi coletado...")
+
     finally:
         session.close()
+        print()
 
-    if not vagas:
-        logger.info("Nenhuma vaga coletada.")
-        return {
-            "status": "sucesso",
-            "modo": modo_execucao,
-            "total_vagas": 0,
-            "caminho_bronze": None,
-            "tamanho_mb": 0.0,
-            "foi_append": False,
-            "data_recente": None,
-        }
+    # Salvar e Checkpoint
+    caminho = salvar_bronze_delta(vagas_buffer, modo_pipeline=modo_exec)
 
-    caminho_arquivo, foi_append = salvar_parquet(vagas, modo_execucao)
-    tamanho_mb = caminho_arquivo.stat().st_size / (1024 * 1024)
-    logger.info(f"Arquivo salvo: {caminho_arquivo} ({tamanho_mb:.2f} MB)")
-
-    checkpoint_mgr.salvar_checkpoint(
-        ultima_data_publicacao=data_recente,
-        total_vagas=len(vagas),
-        metadata={
-            "modo": modo_execucao,
-            "paginas": paginas,
-            "arquivo": str(caminho_arquivo),
-            "foi_append": foi_append,
-        },
-    )
-
-    return {
-        "status": "sucesso",
-        "modo": modo_execucao,
-        "total_vagas": len(vagas),
-        "caminho_bronze": str(caminho_arquivo),
-        "tamanho_mb": tamanho_mb,
-        "foi_append": foi_append,
-    }
+    if vagas_buffer:
+        ckpt_mgr.salvar_checkpoint(
+            ultima_data_publicacao=data_recente,
+            total_vagas=len(vagas_buffer),
+            metadata={
+                "modo": modo_exec,
+                "delta_path": str(caminho),
+                "particao": str(datetime.now().date())
+            }
+        )
+        logger.info(f"Sucesso! Checkpoint atualizado com data {data_recente}")
+    else:
+        logger.info("Nenhuma vaga nova para salvar.")
 
 if __name__ == "__main__":
-    resultado = coletar_vagas_bronze(modo='auto')
-    logger.info(f"Resultado da coleta: {resultado}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["auto", "full", "incremental"], default="auto")
+    args = parser.parse_args()
+
+    coletar_vagas_bronze(modo=args.mode)

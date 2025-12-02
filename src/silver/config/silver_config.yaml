@@ -1,80 +1,134 @@
-# Configuração das fontes de dados para a camada Silver
+# src/silver/config/silver_config.yaml
+
 sources:
   gupy:
-    processor_module: "gupy_silver"
-    bronze_path: "data/bronze/gupy"
+    processor_module: "gupy_processor"
+    bronze_path: "data/bronze_delta/gupy"
     enabled: true
 
-  # linkedin:
-  #   processor_module: "processors.linkedin_silver"
-  #   bronze_path: "data/bronze/linkedin"
-  #   enabled: false
-
-  # indeed:
-  #   processor_module: "processors.indeed_silver"
-  #   bronze_path: "data/bronze/indeed"
-  #   enabled: false
-
-# Configurações globais
 settings:
-  silver_output_path: "data/silver"
+  silver_output_path: "data/silver_delta"
   compression: "zstd"
   dedup_column: "id"
 
-  # Skills database (compartilhado entre todas as fontes)
   skills_tech:
+    # Dados & Analytics (o mais importante pra você)
     - python
-    - java
+    - sql
+    - power bi
+    - tableau
+    - looker
+    - metabase
     - excel
-    - javascript
-    - typescript
-    - golang
-    - rust
-    - "c++"
-    - "c#"
-    - react
-    - angular
-    - vue
-    - node
+    - google sheets
+    - r
+    - pandas
+    - numpy
+    - pyspark
+    - spark
+    - databricks
+    - snowflake
+    - bigquery
+    - redshift
+    - airflow
+    - dbt
+    - etl
+    - elt
+    - data pipeline
+    - data warehouse
+    - data lake
+    - modelagem de dados
+    - banco de dados
+    - business intelligence
+    - bi
+    - analista de dados
+    - data analyst
+    - engenheiro de dados
+    - data engineer
+    - cientista de dados
+    - data scientist
+    - machine learning
+    - ml
+    - inteligencia artificial
+    - ia
+    - ai
+    - análise de dados
+    - analytics
+
+    # Backend
+    - java
+    - spring
+    - spring boot
+    - nodejs
+    - nestjs
     - express
-    - fastapi
+    - golang
+    - python backend
     - django
     - flask
-    - sql
-    - postgresql
-    - mysql
-    - mongodb
-    - redis
-    - elasticsearch
+    - php
+    - laravel
+    - ruby
+    - rails
+    - c#
+    - .net
+    - .net core
+    - api rest
+    - graphql
+    - microservices
+    - microsserviços
+
+    # Frontend / Mobile
+    - javascript
+    - typescript
+    - react
+    - next.js
+    - vue
+    - nuxt
+    - angular
+    - svelte
+    - html
+    - css
+    - tailwind
+    - bootstrap
+    - flutter
+    - react native
+    - swift
+    - kotlin
+    - android
+    - ios
+
+    # DevOps / Cloud / Infra
     - aws
     - azure
     - gcp
     - docker
     - kubernetes
     - terraform
-    - airflow
-    - spark
-    - kafka
-    - hadoop
-    - databricks
-    - git
+    - ansible
     - jenkins
-    - gitlab
+    - gitlab ci
     - github actions
-    - html
-    - css
-    - sass
-    - tailwind
-    - pandas
-    - numpy
-    - scikit-learn
-    - tensorflow
-    - pytorch
-    - api
-    - rest
-    - graphql
-    - grpc
-    - microservices
+    - ci/cd
+    - devops
+    - sre
+    - cloud
+
+    # Outros
+    - figma
+    - ux
+    - ui
+    - product owner
+    - po
+    - product manager
+    - pm
+    - scrum
+    - agile
+    - qa
+    - teste
+    - automação de testes
+    - cybersecurity
+    - segurança da informação
 
   skills_soft:
     - comunicação
@@ -82,27 +136,147 @@ settings:
     - trabalho em equipe
     - proatividade
     - resolução de problemas
-    - criatividade
-    - adaptabilidade
-    - gestão de tempo
     - pensamento crítico
-    - colaboração
+    - organização
+    - gestão de tempo
+    - empatia
+    - resiliência
+    - negociação
+    - inteligência emocional
 
   niveis:
-    estagio: [estagio, estágio, intern, trainee]
-    junior: [junior, jr, iniciante, entry level]
-    pleno: [pleno, mid level, intermediário, intermediario]
-    senior: [senior, sr, sênior, especialista, expert]
-    lead: [lead, tech lead, staff, principal, arquiteto]
+    estagio: [estagio, estágio, estagiário, intern, trainee, estagio remoto]
+    junior: [junior, jr, júnior, iniciante, entrada, "entry level", "nível 1"]
+    pleno: [pleno, Pl, médio, intermediário, "mid level", "nível 2"]
+    senior: [senior, sênior, sr, especialista, avançado, "nível 3"]
+    lead: [lead, tech lead, staff, principal, arquiteto, head, gerente técnico, coordenador]
 
   areas:
-    backend: [backend, back-end, api, servidor, microservices]
-    frontend: [frontend, front-end, react, angular, vue, ui]
-    fullstack: [fullstack, full-stack, full stack]
-    mobile: [mobile, android, ios, react native, flutter]
-    dados: [dados, analytics, bi, cientista de dados, engenheiro de dados]
-    devops: [devops, sre, infraestrutura, cloud, kubernetes]
-    qa: [qa, quality assurance, teste, tester, automação de testes]
-    seguranca: [segurança, security, cybersecurity, pentest]
-    produto: [produto, product, po, product owner]
-    design: [design, ux, ui/ux, designer]
+    dados:
+      - dados
+      - data
+      - analytics
+      - analyst
+      - bi
+      - business intelligence
+      - power bi
+      - tableau
+      - looker
+      - cientista de dados
+      - engenheiro de dados
+      - data engineer
+      - data analyst
+      - data scientist
+      - machine learning
+      - ml
+      - inteligencia artificial
+      - ai
+      - ia
+      - bigquery
+      - snowflake
+      - databricks
+      - dbt
+      - airflow
+      - modelagem de dados
+      - etl
+      - data pipeline
+      - data warehouse
+
+    backend:
+      - backend
+      - back-end
+      - api
+      - rest
+      - graphql
+      - node
+      - java
+      - spring
+      - golang
+      - python backend
+      - spring boot
+      - api rest
+      - django
+      - flask
+      - .net
+      - c#
+      - php
+      - ruby
+      - rails
+      - microservices
+      - microsserviços
+
+    frontend:
+      - frontend
+      - front-end
+      - react
+      - vue
+      - angular
+      - javascript
+      - typescript
+      - next.js
+      - nuxt
+      - html
+      - css
+      - tailwind
+
+    mobile:
+      - mobile
+      - android
+      - ios
+      - flutter
+      - react native
+      - kotlin
+      - swift
+      - aplicativo
+
+    devops:
+      - devops
+      - infra
+      - infraestrutura
+      - cloud
+      - aws
+      - azure
+      - gcp
+      - kubernetes
+      - docker
+      - terraform
+      - ci/cd
+      - sre
+
+    fullstack:
+      - fullstack
+      - full-stack
+      - full stack
+
+    produto:
+      - produto
+      - product owner
+      - po
+      - product manager
+      - pm
+      - gerente de produto
+      - product owner
+
+    design:
+      - design
+      - ux
+      - ui
+      - ui/ux
+      - figma
+      - designer
+      - product design
+      - ux design
+
+    qa:
+      - qa
+      - teste
+      - quality assurance
+      - automação de testes
+      - tester
+
+    seguranca:
+      - segurança
+      - security
+      - cybersecurity
+      - infosec
+      - pentest
