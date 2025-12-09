@@ -1,0 +1,28 @@
+services:
+  vagas-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vagas_etl_dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"   # Streamlit
+      - "4200:4200"   # Prefect UI (opcional, só pra debug)
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    environment:
+      - PREFECT__API_URL=http://127.0.0.1:4200/api
+      - DATA_PATH=/app/data
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "
+        prefect server start --host 0.0.0.0 --port 4200 &
+        sleep 8 &&
+        python flows/medallion_pipeline.py &
+        streamlit run app/dashboard.py --server.port 8501 --server.address 0.0.0.0
+      "
+
+networks:
+  default:
+    name: vagas_network

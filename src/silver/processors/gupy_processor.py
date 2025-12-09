@@ -5,7 +5,6 @@ import re
 import sys
 from typing import Any, Dict
 import polars as pl
-from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import yaml

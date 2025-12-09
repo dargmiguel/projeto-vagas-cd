@@ -23,6 +23,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+BASE_DIR = Path(os.getenv("DATA_PATH", "data"))
+
 # ====================== 1. SCHEMA & CONFIG ======================
 
 BRONZE_SCHEMA = {
@@ -127,7 +129,7 @@ def validar_e_enriquecer(job: dict, modo: str, offset: int) -> Optional[dict]:
 
 def salvar_bronze_delta(vagas: list[dict], modo_pipeline: str) -> Path:
     """Salva os dados em formato Delta Lake."""
-    base_path = Path("data/bronze_delta/gupy")
+    base_path = BASE_DIR / "bronze_delta" / "gupy"
 
     if not vagas:
         return base_path

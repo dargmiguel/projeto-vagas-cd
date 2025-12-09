@@ -1,5 +1,6 @@
 import importlib
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -9,7 +10,7 @@ import polars as pl
 # from src.utils.checkpoint_manager import CheckpointManager
 
 logger = logging.getLogger(__name__)
-
+BASE_DIR = Path(os.getenv("DATA_PATH", "data"))
 
 def carregar_bronze(bronze_path: str, data: Optional[datetime] = None) -> Optional[pl.DataFrame]:
     """Carrega dados da camada bronze.
@@ -25,7 +26,9 @@ def carregar_bronze(bronze_path: str, data: Optional[datetime] = None) -> Option
         data = datetime.now()
 
     try:
-        df = pl.scan_delta(bronze_path)\
+        caminho_ajustado = str(bronze_path).replace("data/", "").replace("data\\", "")
+        full_path = BASE_DIR / caminho_ajustado
+        df = pl.scan_delta(str(full_path))\
             .filter(pl.col("_partition_date") == data.date())\
             .collect()
         df_unique = df.sort("_horario_ingestao", descending=True).unique(subset=["id"], keep="first")
@@ -94,8 +97,10 @@ def processar_source(source_name: str,
         return {"status": "no_data", "reason": "no_processed_data"}
 
     # Salva os dados processados
+    path_config = global_config['settings']['silver_output_path']
+    caminho_limpo = str(path_config).replace("data/", "").replace("data\\", "")
 
-    silver_root = Path(global_config['settings']['silver_output_path']) / source_name
+    silver_root = BASE_DIR / caminho_limpo / source_name
     silver_root.mkdir(parents=True, exist_ok=True)
 
 
