@@ -1,0 +1,23 @@
+# Configurações da Camada Bronze
+# Este arquivo controla quais scrapers serão executados pelo orquestrador run_Bronze.py
+
+sources:
+  # --- Fonte 1: LinkedIn ---
+  linkedin:
+    enabled: false
+    # Caminho de importação do python (ex: src/scrapers/linkedin/run.py vira src.scrapers.linkedin.run)
+    module: "src.scrapers.linkedin.run"
+    # Nome da função principal dentro desse arquivo que inicia o processo
+    function: "run_scraper"
+
+  # --- Fonte 2: Gupy ---
+  gupy:
+    enabled: true
+    module: "src.bronze.gupy_scraper"
+    function: "coletar_vagas_bronze"
+
+  # --- Fonte 3: Glassdoor (Exemplo desativado) ---
+  glassdoor:
+    enabled: false
+    module: "src.scrapers.glassdoor.main"
+    function: "main"
