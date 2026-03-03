@@ -1,4 +1,4 @@
-# 🎯 Data Engine para Matching de Currículos (Vagas CD)
+# 🎯 Data Engine para Matching de Currículos e Vagas
 
 ![Python](https://img.shields.io/badge/Python-3.13%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Polars](https://img.shields.io/badge/Polars-Fast%20Data-orange?style=for-the-badge&logo=polars&logoColor=white)
@@ -40,6 +40,16 @@ Exemplo enriquecido e limpo gerado na camada final (`dim_vagas` - Gold Layer), p
   "skills_soft": ["comunicação", "liderança"]
 }
 ```
+
+---
+
+## 📊 Visualização & Insights (Dashboard)
+
+Aqui está uma visão geral do processamento das vagas, destacando as tecnologias mais demandadas e a distribuição geográfica das oportunidades capturadas pelo pipeline.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/06c09983-f129-4d49-8ca6-a2ef574d93d5" alt="Dashboard Streamlit" width="900">
+</p>
 
 ---
 
