@@ -24,13 +24,20 @@ Exemplo enriquecido e limpo gerado na camada final (`dim_vagas` - Gold Layer), p
 {
   "vaga_id": "9382104",
   "titulo": "Pessoa Cientista de Dados Sênior",
+  "descricao_limpa": "Venha fazer parte do nosso time de dados...",
   "empresa": "TechCorp S.A.",
-  "location": "São Paulo, SP (Híbrido)",
-  "isRemoteWork": false,
-  "publishedDate": "2024-03-01T10:00:00Z",
-  "skills_extraidas": ["Python", "Machine Learning", "SQL", "Spark", "AWS"],
-  "seniority": "Sênior",
-  "_partition_date": "2024-03-01"
+  "localizacao": "São Paulo, SP",
+  "modalidade": "híbrido",
+  "nivel": 4,
+  "area_principal": "dados",
+  "is_tech": true,
+  "data_expiracao": "2024-04-01",
+  "data_publicacao": "2024-03-01T10:00:00.000000Z",
+  "ano_publicacao": 2024,
+  "mes_publicacao": 3,
+  "url": "https://techcorp.gupy.io/jobs/9382104",
+  "skills_tech": ["python", "machine learning", "sql", "spark", "aws"],
+  "skills_soft": ["comunicação", "liderança"]
 }
 ```
 
@@ -126,11 +133,20 @@ dim_vagas = pl.scan_delta("data/gold_delta/dim_vagas")
 |--------|------|-----------|
 | `vaga_id` | String | Identificador único da oportunidade |
 | `titulo` | String | Nome / Cargo ofertado gerado na limpeza |
+| `descricao_limpa` | String | Texto da vaga limpo sem tags HTML e caracteres especiais |
 | `empresa` | String | Entidade contratante |
-| `isRemoteWork` | Boolean | Indica se a vaga aceita ou exige regime remoto |
-| `publishedDate` | Datetime | Data de publicação na plataforma de origem |
-| `skills_extraidas` | Array[String] | Array contendo hard e soft skills do texto parseado |
-| `_partition_date` | Date | Data de processamento e partição do storage diário |
+| `localizacao` | String | Cidade e estado da vaga |
+| `modalidade` | String | Regime de trabalho (remoto, híbrido, presencial) |
+| `nivel` | Int8 | Senioridade mapeada (1 a 5) |
+| `area_principal` | String | Área de atuação classificada a partir do texto |
+| `is_tech` | Boolean | Indica se a vaga foi classificada primariamente como tecnologia |
+| `data_expiracao` | Date | Data limite para aplicação, se especificada |
+| `data_publicacao` | Datetime | Data de publicação na plataforma de origem |
+| `ano_publicacao` | Int32 | Ano extratído da publicação |
+| `mes_publicacao` | Int8 | Mês extraído da publicação |
+| `url` | String | Link da vaga na plataforma |
+| `skills_tech` | Array[String] | Array contendo hard skills do texto parseado |
+| `skills_soft` | Array[String] | Array contendo soft skills do texto parseado |
 
 ---
 
@@ -179,15 +195,3 @@ Leia os logs (`docker logs vagas_etl_worker -f`), garanta que o Prefect Server (
 - [ ] Desenvolvimento adjacente do Motor NLP para realizar o cruzamento Vagas <-> Perfis baseado neste Delta Lake.
 
 ---
-
-## 🤝 Contribuindo
-
-Pull Requests são muito bem-vindos! Se este projeto te instiga a colaborar:
-
-1. Faça o Fork do repositório
-2. Crie sua *Feature Branch* (`git checkout -b feature/minha-melhoria-irada`)
-3. Versiona suas adições (`git commit -m 'feat: Add nova fonte de vagas'`)
-4. Empurre o push para a conta base (`git push origin feature/minha-melhoria-irada`)
-5. Abra seu Pull Request para homologação.
-
-Distribuído sob a licença **MIT** - Livre para uso e modificações.
