@@ -5,7 +5,6 @@ from datetime import datetime
 import polars as pl
 from src.gold.processors import gold_aggregators
 
-# Configuração de Logs
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -22,7 +21,6 @@ def main():
     config = carregar_config()
     settings = config['settings']
 
-    # 1. Ler TUDO da Silver (Histórico Completo)
     logger.info(f"Lendo Silver Delta Table: {settings['silver_path']}")
     try:
         lf_silver = pl.scan_delta(settings['silver_path'])
@@ -30,7 +28,6 @@ def main():
         logger.error(f"Erro ao ler Silver. Verifique se o caminho existe. {e}")
         return
 
-    # Cria pasta de saída se não existir
     output_path = Path(settings['gold_output_path'])
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -41,10 +38,10 @@ def main():
         logger.info("Gerando dim_vagas...")
         df_dim = gold_aggregators.criar_dim_vagas(lf_silver)
 
-        path_dim = output_path / "dim_vagas"
+        path_dim = (output_path / "dim_vagas").resolve()
         df_dim.write_delta(
-            str(path_dim),
-            mode="overwrite", # Na Gold, geralmente sobrescrevemos dimensões para refletir o estado atual
+            path_dim.as_posix(),
+            mode="overwrite",
             delta_write_options={
                 "schema_mode": "overwrite",
                 "partition_by": settings['tables']['dim_vagas']['partition_by']
@@ -58,7 +55,6 @@ def main():
         df_skills = gold_aggregators.criar_agg_skills_monitor(lf_silver)
 
         path_skills = output_path / "agg_skills_monitor"
-        # Aqui podemos usar append se quisermos histórico dia a dia do ranking
         df_skills.write_delta(
             str(path_skills),
             mode="overwrite",

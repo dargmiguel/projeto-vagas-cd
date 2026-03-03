@@ -2,7 +2,7 @@
 Gerenciador de checkpoint para controle de estado do pipeline
 """
 
-import os  # Necessário para ler variáveis de ambiente
+import os
 from pathlib import Path
 import logging
 import json
@@ -10,8 +10,7 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
-# 1. Define o diretório base (Mundo dos Dados)
-# Isso garante que os checkpoints fiquem em data/checkpoints, independente do ambiente
+
 BASE_DIR = Path(os.getenv("DATA_PATH", "data"))
 
 class CheckpointManager:
@@ -34,11 +33,11 @@ class CheckpointManager:
 
         self.source = source
 
-        # 2. Lógica de Diretório Dinâmico
+
         if checkpoint_dir:
             self.checkpoint_dir = Path(checkpoint_dir)
         else:
-            # Se ninguém passar um caminho, usa o padrão robusto baseado no BASE_DIR
+
             self.checkpoint_dir = BASE_DIR / "checkpoints"
 
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -66,7 +65,6 @@ class CheckpointManager:
         checkpoint_data = {"source": self.source, **kwargs}
 
         try:
-            # --- Escrita Atômica ---
             # 1. Cria um arquivo temporário no mesmo diretório do checkpoint final
             fd, temp_path = tempfile.mkstemp(dir=self.checkpoint_dir, prefix=".tmp_")
             os.close(fd) # Fecha o descritor de arquivo, vamos usar o Path

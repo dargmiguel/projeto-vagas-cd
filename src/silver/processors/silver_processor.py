@@ -13,24 +13,18 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(os.getenv("DATA_PATH", "data"))
 
 def carregar_bronze(bronze_path: str, data: Optional[datetime] = None) -> Optional[pl.DataFrame]:
-    """Carrega dados da camada bronze.
-
-    Args:
-        bronze_path (str): Caminho para os dados bronze.
-        data (Optional[datetime], optional): Data específica para carregar. Defaults to None.
-
-    Returns:
-        Optional[pl.DataFrame]: DataFrame carregado ou None se não houver dados.
-    """
+    """Carrega dados da camada bronze."""
     if data is None:
         data = datetime.now()
 
     try:
         caminho_ajustado = str(bronze_path).replace("data/", "").replace("data\\", "")
         full_path = BASE_DIR / caminho_ajustado
+
         df = pl.scan_delta(str(full_path))\
             .filter(pl.col("_partition_date") == data.date())\
             .collect()
+
         df_unique = df.sort("_horario_ingestao", descending=True).unique(subset=["id"], keep="first")
 
         if df.is_empty():
@@ -54,22 +48,12 @@ def processar_source(source_name: str,
                       global_config: dict,
                       data: Optional[datetime] = None) -> Dict[str,Any]:
 
-    """Processa dados de uma fonte específica.
-    Args:
-        source_name (str): Nome da fonte.
-        source_config (dict): Configuração específica da fonte.
-        global_config (dict): Configuração global do pipeline.
-        data (Optional[datetime], optional): Data para processamento. Defaults to None.
-    Returns:
-        Dict[str,Any]: Dicionário com resultados do processamento.
-    """
+    """Processa dados de uma fonte específica."""
     logger.info(f"Iniciando processamento para a fonte: {source_name}")
     if not source_config.get("enabled", True):
         logger.info(f"Processamento desabilitado para a fonte: {source_name}. Pulando...")
         return {"status": "skipped", "reason": "disabled in config"}
-    # checkpoint_mgr = CheckpointManager(source=source_name)
 
-    # Carrega o processador especifico
     try:
         module_path = f'.{source_config["processor_module"]}'
         processador_module = importlib.import_module(module_path, package='src.silver.processors')
@@ -78,7 +62,6 @@ def processar_source(source_name: str,
         logger.error(f"Erro ao importar módulo de processamento para a fonte {source_name}: {e}")
         return {"status": "error", "reason": "import_error"}
 
-    # Carrega dados bronze
     df_bronze = carregar_bronze(source_config["bronze_path"], data)
     if df_bronze is None or df_bronze.is_empty():
         return {"status": "no_data", "reason": "no_bronze_data"}
@@ -100,7 +83,7 @@ def processar_source(source_name: str,
     path_config = global_config['settings']['silver_output_path']
     caminho_limpo = str(path_config).replace("data/", "").replace("data\\", "")
 
-    silver_root = BASE_DIR / caminho_limpo / source_name
+    silver_root = (BASE_DIR / caminho_limpo / source_name).resolve()
     silver_root.mkdir(parents=True, exist_ok=True)
 
 
@@ -110,13 +93,13 @@ def processar_source(source_name: str,
     logger.info(f"Modo de escrita Delta (silver): {write_mode}")
 
     df_silver.write_delta(
-        str(silver_root),
+        silver_root.as_posix(),
         mode=write_mode,
+        storage_options={"allow_unsafe_rename": "true"},
         delta_write_options={
-            "schema_mode": "merge",
+            "schema_mode": "overwrite",
             "partition_by": ["ano_publicacao", "mes_publicacao"]
         }
-
     )
 
     logger.info(f"Processamento concluído para a fonte {source_name}. -> {df_silver.height} vagas.")

@@ -102,11 +102,11 @@ def processar_vagas(df_bronze: pl.DataFrame | pl.LazyFrame, config: dict) -> pl.
         # Nível
         .with_columns([
             pl.coalesce([
-                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("lead", r"(?!)"))).then(5),
-                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("senior", r"(?!)"))).then(4),
-                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("pleno", r"(?!)"))).then(3),
-                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("junior", r"(?!)"))).then(2),
-                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("estagio", r"(?!)"))).then(1),
+                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("lead", r"a^"))).then(5),
+                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("senior", r"a^"))).then(4),
+                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("pleno", r"a^"))).then(3),
+                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("junior", r"a^"))).then(2),
+                pl.when(pl.col("texto_busca").str.contains(nivel_regex.get("estagio", r"a^"))).then(1),
                 pl.lit(0)
             ]).cast(pl.Int8).alias("nivel")
         ]))
@@ -148,13 +148,22 @@ def processar_vagas(df_bronze: pl.DataFrame | pl.LazyFrame, config: dict) -> pl.
                 .then(pl.lit(area))
             )
 
-        # 3. Define area_principal (Se score for 0, vira "geral")
+        # 3. Define area_principal (Se score for 0 ou sem skills, vira "geral")
     lf = lf.with_columns([
             pl.when(pl.col("_max_score") == 0)
             .then(pl.lit("geral"))
             .otherwise(pl.coalesce(when_then_chains))
             .alias("area_principal")
         ])
+
+    # Se a área principal não for geral, rh, marketing, etc., exigir skills técnicas
+    non_tech_areas = ["geral", "design", "produto", "qa", "seguranca"]
+    lf = lf.with_columns([
+            pl.when((~pl.col("area_principal").is_in(non_tech_areas)) & (pl.col("skills_tech").list.len() == 0))
+            .then(pl.lit("geral"))
+            .otherwise(pl.col("area_principal"))
+            .alias("area_principal")
+    ])
 
         # 4. Gera a lista 'areas' com todas as áreas que pontuaram algo (multilabel)
     list_areas_expr = pl.concat_list([

@@ -15,7 +15,7 @@ import os
 
 from src.utils.checkpoint_manager import CheckpointManager
 
-# Configurar logging
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -89,7 +89,15 @@ def print_metrics(paginas, max_paginas, offset, total_vagas, novas_pagina, antig
     sys.stdout.flush()
 
 def extrair_vagas(session: requests.Session, api_url: str, offset: int, limit: int, timeout: int) -> Optional[List[dict]]:
-    """Faz a request para a API da Gupy."""
+    """Faz a request para a API da Gupy.
+     Args:
+        session (requests.Session): Sessão requests para reuso de conexões.
+        api_url (str): URL base da API.
+        offset (int): Offset para paginação.
+        limit (int): Quantidade de vagas por página.
+        timeout (int): Timeout da requisição.
+     Returns:
+        List[dict] | None: Lista de vagas (dicionários) ou None em caso de erro."""
     try:
         resp = session.get(
             f"{api_url}?limit={limit}&offset={offset}",
@@ -102,7 +110,14 @@ def extrair_vagas(session: requests.Session, api_url: str, offset: int, limit: i
         return None
 
 def validar_e_enriquecer(job: dict, modo: str, offset: int) -> Optional[dict]:
-    """Valida data e adiciona as colunas de metadados."""
+    """Valida data e adiciona as colunas de metadados.
+        Args:
+        job (dict): Dicionário da vaga.
+        modo (str): Modo de execução (full/incremental).
+        offset (int): Offset atual (para rastreamento).
+    Returns:
+        dict | None: Vaga enriquecida ou None se inválida.
+    """
     pub = job.get("publishedDate")
     if not pub:
         return None
@@ -115,10 +130,9 @@ def validar_e_enriquecer(job: dict, modo: str, offset: int) -> Optional[dict]:
 
     agora = datetime.now()
 
-    # AQUI ESTÁ O SEGREDO: Criamos as duas colunas
     job.update({
-        "_horario_ingestao": agora,          # Datetime completo
-        "_partition_date": agora.date(),     # Apenas a data (para a pasta)
+        "_horario_ingestao": agora,
+        "_partition_date": agora.date(),
         "_source": "gupy",
         "_offset": offset,
         "_modo": modo,
@@ -128,8 +142,14 @@ def validar_e_enriquecer(job: dict, modo: str, offset: int) -> Optional[dict]:
 # ====================== 3. SALVAR EM DELTA ======================
 
 def salvar_bronze_delta(vagas: list[dict], modo_pipeline: str) -> Path:
-    """Salva os dados em formato Delta Lake."""
-    base_path = BASE_DIR / "bronze_delta" / "gupy"
+    """Salva os dados em formato Delta Lake.
+    Args:
+        vagas (list[dict]): Lista de vagas coletadas.
+        modo_pipeline (str): Modo de execução (full/incremental).
+    Returns:
+        Path: Caminho onde os dados foram salvos.
+    """
+    base_path = (BASE_DIR / "bronze_delta" / "gupy").resolve()
 
     if not vagas:
         return base_path
@@ -144,7 +164,7 @@ def salvar_bronze_delta(vagas: list[dict], modo_pipeline: str) -> Path:
     logger.info(f"\nSalvando {len(df)} vagas em Delta ({modo_escrita})...")
 
     df.write_delta(
-        str(base_path),
+        base_path.as_posix(),
         mode=modo_escrita,
         # Particionamento por DIA para evitar excesso de arquivos
         delta_write_options={
@@ -154,15 +174,19 @@ def salvar_bronze_delta(vagas: list[dict], modo_pipeline: str) -> Path:
     )
     return base_path
 
-# ====================== 4. CORE PIPELINE ======================
-
 def decidir_modo(modo: str, checkpoint: dict | None) -> tuple[str, str | None, int]:
+    """Decide o modo de execução baseado no argumento e checkpoint.
+    Args:
+        modo (str): Modo solicitado ("auto", "full", "incremental").
+        checkpoint (dict | None): Checkpoint carregado.
+    Returns:
+        tuple[str, str | None, int]: Modo decidido, última data conhecida, máximo de páginas.
+    """
     config = Config.from_env()
 
     if modo == "full":
         return "full", None, config.max_paginas_full
 
-    # Se for auto e não tiver checkpoint, força full
     if modo == "auto" and not checkpoint:
         logger.info("Sem checkpoint anterior. Iniciando FULL LOAD.")
         return "full", None, config.max_paginas_full
@@ -173,6 +197,10 @@ def decidir_modo(modo: str, checkpoint: dict | None) -> tuple[str, str | None, i
     return "incremental", ultima_data, config.max_paginas_incremental
 
 def coletar_vagas_bronze(modo: str = "auto"):
+    """Coleta vagas da API Gupy e salva em Delta Lake.
+    Args:
+        modo (str): Modo de execução ("auto", "full", "incremental").
+    """
     # Setup
     config = Config.from_env()
     ckpt_mgr = CheckpointManager(source="gupy_bronze")
@@ -198,11 +226,11 @@ def coletar_vagas_bronze(modo: str = "auto"):
         while paginas < max_paginas and offset <= config.max_offset:
             jobs = extrair_vagas(session, config.api_url, offset, config.limit, config.timeout)
 
-            if jobs is None: # Erro API
+            if jobs is None:
                 time.sleep(config.sleep_error)
                 continue
 
-            if not jobs: # Lista vazia = fim
+            if not jobs:
                 logger.info("\nAPI não retornou mais vagas.")
                 break
 
@@ -214,7 +242,6 @@ def coletar_vagas_bronze(modo: str = "auto"):
 
                 pub_date = job_processed['publishedDate']
 
-                # Rastreia data mais recente vista nesta execução
                 if data_recente is None or pub_date > data_recente:
                     data_recente = pub_date
 
@@ -223,10 +250,10 @@ def coletar_vagas_bronze(modo: str = "auto"):
                     antigas_consec += 1
                     if antigas_consec >= config.max_antigas:
                         stop_signal = True
-                        break # Sai do loop de vagas
-                    continue # Ignora vaga velha, mas continua vendo a página
+                        break
+                    continue
                 else:
-                    antigas_consec = 0 # Reset se achar uma nova
+                    antigas_consec = 0
 
                 vagas_buffer.append(job_processed)
                 novas_nesta_pg += 1
@@ -258,7 +285,7 @@ def coletar_vagas_bronze(modo: str = "auto"):
             total_vagas=len(vagas_buffer),
             metadata={
                 "modo": modo_exec,
-                "delta_path": str(caminho),
+                "delta_path": caminho.as_posix(),
                 "particao": str(datetime.now().date())
             }
         )

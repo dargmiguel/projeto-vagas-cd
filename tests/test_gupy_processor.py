@@ -1,10 +1,6 @@
-# tests/test_feature_extractor.py
-from datetime import datetime
-
 import polars as pl
-
-from silver.processors.gupy_processor import FeatureExtractor
-
+from datetime import datetime
+from src.silver.processors.gupy_processor import _build_regex, processar_vagas
 
 def _config_minimo():
     return {
@@ -22,59 +18,65 @@ def _config_minimo():
         },
     }
 
+def test_build_regex():
+    termos = ["python", "c++", "trabalho em equipe", "a"]
+    padrao = _build_regex(termos)
 
-def test_feature_extractor_basico():
+    # "trabalho em equipe" (frase -> sem \b)
+    assert "trabalho\\ em\\ equipe" in padrao
+    # "python" (palavra simples -> com \b)
+    assert r"\bpython\b" in padrao
+    # Ignora strings curtas como "a"
+    assert r"\ba\b" not in padrao
+
+def test_processar_vagas():
     config = _config_minimo()
-    extractor = FeatureExtractor(config)
 
     df_bronze = pl.DataFrame(
         {
             "id": ["1"],
-            "companyId": ["123"],
+            "companyId": [123],
             "name": ["Engenheiro de Dados Jr"],
             "careerPageName": ["Empresa X"],
             "careerPageLogo": ["https://logo"],
             "careerPageUrl": ["https://empresa-x"],
             "description": [
-                """
-                Buscamos Engenheiro de Dados com experiência em Python e SQL.
-                Trabalho em equipe é essencial.
-                """
+                "Buscamos Engenheiro de Dados com experiência em Python e SQL. Trabalho em equipe é essencial."
             ],
             "city": ["São Paulo"],
             "state": ["SP"],
             "country": ["Brasil"],
-            "publishedDate": [datetime(2025, 1, 1).isoformat()],
-            "applicationDeadline": [None],
+            "publishedDate": ["2025-01-01T10:00:00Z"],
+            "applicationDeadline": ["2025-02-01"],
             "jobUrl": ["https://vaga"],
             "disabilities": [False],
             "isRemoteWork": [True],
             "workplaceType": ["remote"],
+            "_horario_ingestao": [datetime(2025, 1, 1, 12, 0, 0)],
+            "_partition_date": [datetime(2025, 1, 1).date()],
         }
     )
 
-    lf_silver = extractor.aplicar(df_bronze.lazy())
-    df_silver = lf_silver.collect()
+    df_silver = processar_vagas(df_bronze, config)
 
     assert df_silver.height == 1
 
     row = df_silver.row(0, named=True)
 
-    # skills_tech deve conter python e sql
+    # skills_tech deve conter python e sql (lower case validation)
     assert set(row["skills_tech"]) >= {"python", "sql"}
 
     # skills_soft deve pegar "trabalho em equipe"
     assert "trabalho em equipe" in row["skills_soft"]
 
-    # nível: token encontrado pelo regex (sem padronização ainda)
-    assert row["nivel"] == "2"
+    # nível: 2 para junior (de acordo com as lógicas no gupy_processor)
+    assert row["nivel"] == 2
 
-    # areas: garantir que não está vazio
-    assert len(row["areas"]) > 0
+    # areas principais: dados
+    assert row["area_principal"] == "dados"
 
-    # flags
-    assert row["is_tech"] is True
-    assert isinstance(row["is_dados"], bool)
+    # total skills
+    assert row["total_skills"] == 3 # python, sql, trabalho em equipe
 
     # modalidade e localizacao
     assert row["modalidade"] == "remoto"
