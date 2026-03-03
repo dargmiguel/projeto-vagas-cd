@@ -6,4 +6,3 @@ logs/
 *.cpython-311.pyc
 __pycache__/
 notebooks/
-tests/
