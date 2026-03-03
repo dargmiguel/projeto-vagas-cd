@@ -14,31 +14,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ====================== CONFIGURAÇÃO DE CAMINHOS ROBUSTA ======================
 CONFIG_FILENAME = "bronze_config.yaml"
 
 def find_config_path() -> Path:
     """
     Tenta localizar o arquivo de configuração procurando em locais prováveis.
     """
-    # Caminho do próprio script (ex: C:\projeto\src\bronze\run_bronze.py)
     script_dir = Path(__file__).resolve().parent
 
-    # Raiz do projeto (assumindo que estamos em src/bronze)
     project_root = script_dir.parents[1]
 
-    # Lista de locais para procurar (em ordem de prioridade)
     candidates = [
-        # 1. src/bronze/config/bronze_config.yaml (O local que você confirmou)
         script_dir / "config" / CONFIG_FILENAME,
 
-        # 2. config/bronze_config.yaml (Na raiz do projeto)
         project_root / "config" / CONFIG_FILENAME,
 
-        # 3. src/config/bronze_config.yaml
         project_root / "src" / "config" / CONFIG_FILENAME,
 
-        # 4. Baseado apenas no diretório de execução atual
+
         Path.cwd() / "config" / CONFIG_FILENAME
     ]
 
@@ -50,7 +43,6 @@ def find_config_path() -> Path:
             logger.info(f"Arquivo de configuração encontrado em: {path}")
             return path
 
-    # Se chegou aqui, não achou
     logger.critical("NÃO FOI POSSÍVEL ENCONTRAR O ARQUIVO DE CONFIGURAÇÃO.")
     logger.critical(f"Procurado nos seguintes caminhos:\n" + "\n".join(checked_paths))
     sys.exit(1)

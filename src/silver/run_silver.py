@@ -1,16 +1,16 @@
 import argparse
-import os  # <--- Faltava esse import
+import os
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 from typing import Optional
 import yaml
-import importlib # Movi para o topo por boa prática, mas funciona dentro do if também
-import polars as pl # Movi para o topo por boa prática
+import importlib
+import polars as pl
 
 from src.silver.processors.silver_processor import carregar_bronze, processar_source
 
-# 1. Define o diretório base (Mundo dos Dados)
+
 BASE_DIR = Path(os.getenv("DATA_PATH", "data"))
 
 logging.basicConfig(
@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def carregar_config() -> dict:
-    # Ajuste o número de .parent dependendo de onde este arquivo run_Silver.py está
-    # Se ele está em src/scripts/run_Silver.py:
-    # .parent (scripts) -> .parent (src) -> / silver / config
+
     config_path = Path(__file__).parent.parent / "silver" / "config" / "silver_config.yaml"
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -56,7 +54,6 @@ def main():
         datas = [data_especifica]
         logger.info(f"Processamento normal → {data_especifica.date()}")
 
-    # --- Bloco Full Reprocess ---
     if args.full:
         todos_silvers = {}
         for dt in datas:
@@ -65,8 +62,7 @@ def main():
                 if not source_cfg.get("enabled", True):
                     continue
                 try:
-                    # DICA: Se bronze_path no yaml for só o nome da pasta (ex: "linkedin"),
-                    # você pode fazer: carregar_bronze(BASE_DIR / "bronze" / source_cfg["bronze_path"], dt)
+
                     df_bronze = carregar_bronze(source_cfg["bronze_path"], dt)
 
                     if df_bronze is not None and not df_bronze.is_empty():
@@ -84,7 +80,6 @@ def main():
                 except Exception as e:
                     logger.error(f"Erro no full reprocess {source_name}: {e}")
 
-        # Consolidação e Escrita (AQUI ESTA A MUDANÇA PRINCIPAL)
         for source_name, silvers in todos_silvers.items():
             if silvers:
                 df_consolidado = (
@@ -94,14 +89,13 @@ def main():
                 )
                 logger.info(f"{source_name}: {len(silvers)} batches → {df_consolidado.height} vagas únicas")
 
-                # --- CORREÇÃO APLICADA AQUI ---
-                # Removemos a dependência do config yaml e usamos a estrutura padrão
-                silver_root = BASE_DIR / "silver" / source_name
+                silver_root = (BASE_DIR / "silver_delta" / source_name).resolve()
                 silver_root.mkdir(parents=True, exist_ok=True)
 
                 df_consolidado.write_delta(
-                    str(silver_root),
+                    silver_root.as_posix(),
                     mode="overwrite",
+                    storage_options={"allow_unsafe_rename": "true"},
                     delta_write_options={
                         "schema_mode": "overwrite",
                         "partition_by": ["ano_publicacao", "mes_publicacao"]
@@ -109,7 +103,6 @@ def main():
                 )
                 logger.info(f"{source_name}: {df_consolidado.height} vagas gravadas em {silver_root}")
 
-    # --- Bloco Processamento Normal (Incremental) ---
     else:
         for dt in datas:
             logger.info(f"\n{'='*60}")
@@ -123,9 +116,7 @@ def main():
 
                 try:
                     logger.info(f"\nProcessando fonte: {source_name}")
-                    # ATENÇÃO: Verifique se a função 'processar_source' dentro de silver_processor.py
-                    # também está usando BASE_DIR para salvar, ou se ela ainda lê do config['silver_output_path'].
-                    # Se ela ler do config, você precisará editar o arquivo silver_processor.py também.
+
                     resultado = processar_source(source_name, source_cfg, config, dt)
 
                     logger.info(f"Resultado: {resultado}")

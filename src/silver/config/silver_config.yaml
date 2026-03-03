@@ -19,8 +19,6 @@ settings:
     - tableau
     - looker
     - metabase
-    - excel
-    - google sheets
     - r
     - pandas
     - numpy
@@ -146,15 +144,13 @@ settings:
 
   niveis:
     estagio: [estagio, estágio, estagiário, intern, trainee, estagio remoto]
-    junior: [junior, jr, júnior, iniciante, entrada, "entry level", "nível 1"]
-    pleno: [pleno, Pl, médio, intermediário, "mid level", "nível 2"]
-    senior: [senior, sênior, sr, especialista, avançado, "nível 3"]
+    junior: [junior, jr, júnior, "entry level", "nível 1"]
+    pleno: [pleno, pl, "mid level", "nível 2"]
+    senior: [senior, sênior, sr, especialista, "nível 3"]
     lead: [lead, tech lead, staff, principal, arquiteto, head, gerente técnico, coordenador]
 
   areas:
     dados:
-      - dados
-      - data
       - analytics
       - analyst
       - bi
@@ -181,6 +177,13 @@ settings:
       - etl
       - data pipeline
       - data warehouse
+      - data lake
+      - engenharia de dados
+      - hadoop
+      - kafka
+      - aws glue
+      - athena
+      - synapse
 
     backend:
       - backend
@@ -204,6 +207,17 @@ settings:
       - rails
       - microservices
       - microsserviços
+      - gin
+      - fastapi
+      - laravel
+      - springboot
+      - desenvolvedor back
+      - desenvolvedor backend
+      - engenheiro backend
+      - go
+      - postgresql
+      - mongodb
+      - redis
 
     frontend:
       - frontend
@@ -218,6 +232,13 @@ settings:
       - html
       - css
       - tailwind
+      - svelte
+      - webpack
+      - vite
+      - desenvolvedor front
+      - desenvolvedor frontend
+      - dev frontend
+      - web developer
 
     mobile:
       - mobile
@@ -228,11 +249,14 @@ settings:
       - kotlin
       - swift
       - aplicativo
+      - ionic
+      - xamarin
+      - desenvolvedor mobile
+      - ios developer
+      - android developer
 
     devops:
       - devops
-      - infra
-      - infraestrutura
       - cloud
       - aws
       - azure
@@ -242,6 +266,15 @@ settings:
       - terraform
       - ci/cd
       - sre
+      - analista de infraestrutura
+      - engenheiro de infraestrutura
+      - sysadmin
+      - linux
+      - ansible
+      - prometheus
+      - grafana
+      - engenheiro de confiabilidade
+      - cloud engineer
 
     fullstack:
       - fullstack
@@ -249,16 +282,13 @@ settings:
       - full stack
 
     produto:
-      - produto
       - product owner
       - po
       - product manager
       - pm
       - gerente de produto
-      - product owner
 
     design:
-      - design
       - ux
       - ui
       - ui/ux
@@ -266,17 +296,37 @@ settings:
       - designer
       - product design
       - ux design
+      - adobe xd
+      - sketch
+      - prototipagem
+      - wireframe
+      - design system
+      - interaction design
+      - visual design
+      - user research
+      - pesquisa de usuário
+      - web design
+      - mobile design
+      - illustrator
+      - photoshop
+      - zeplin
+      - prototyping
+      - wireframing
 
     qa:
       - qa
-      - teste
       - quality assurance
       - automação de testes
       - tester
+      - analista de testes
+      - engenheiro de testes
+      - cypress
+      - selenium
+      - jest
 
     seguranca:
-      - segurança
-      - security
       - cybersecurity
       - infosec
       - pentest
+      - segurança da informação
+      - cyber security

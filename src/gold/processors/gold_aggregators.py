@@ -12,10 +12,10 @@ def criar_dim_vagas(lf: pl.LazyFrame) -> pl.DataFrame:
     """
     return (
         lf
-        .select(["vaga_id", "titulo", "empresa", "localizacao", "modalidade",
-            "nivel" ,"area_principal", "is_tech",
+        .select(["vaga_id", "titulo","descricao_limpa", "empresa", "localizacao", "modalidade",
+            "nivel" ,"area_principal", "is_tech","data_expiracao",
             "data_publicacao", "ano_publicacao", "mes_publicacao",
-            "url"])
+            "url", "skills_tech", "skills_soft"])
             .unique(subset=["vaga_id"])
         .collect()
     )
