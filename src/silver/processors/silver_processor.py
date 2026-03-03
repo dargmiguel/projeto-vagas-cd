@@ -93,14 +93,14 @@ def processar_source(source_name: str,
     logger.info(f"Modo de escrita Delta (silver): {write_mode}")
 
     df_silver.write_delta(
-    silver_root.as_posix(),
-    mode="overwrite",
-    storage_options={"allow_unsafe_rename": "true"},
-    delta_write_options={
-        "schema_mode": "overwrite",
-        "partition_by": ["ano_publicacao", "mes_publicacao"]
-    }
-)
+        silver_root.as_posix(),
+        mode=write_mode,
+        storage_options={"allow_unsafe_rename": "true"},
+        delta_write_options={
+            "schema_mode": "overwrite",
+            "partition_by": ["ano_publicacao", "mes_publicacao"]
+        }
+    )
 
     logger.info(f"Processamento concluído para a fonte {source_name}. -> {df_silver.height} vagas.")
 

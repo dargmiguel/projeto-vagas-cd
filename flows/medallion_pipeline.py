@@ -58,7 +58,7 @@ def gold_aggregates():
     script_path = PROJECT_ROOT / "src" / "gold" / "run_gold.py"
 
     if not script_path.exists():
-         print(f" cript Gold não encontrado em {script_path}. Pulando...")
+         print(f"Script Gold não encontrado em {script_path}. Pulando...")
          return
 
     run_command([sys.executable, str(script_path)])
