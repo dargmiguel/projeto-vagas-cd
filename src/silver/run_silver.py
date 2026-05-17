@@ -31,12 +31,20 @@ def carregar_config() -> dict:
         raise
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Processa camada Silver")
-    parser.add_argument("--date", type=str, help="Data específica (YYYY-MM-DD)")
-    parser.add_argument("--full", action="store_true", help="Força overwrite em todas as fontes")
-    parser.add_argument("--data-inicio", type=str, help="Data inicial para --full (YYYY-MM-DD)")
-    args = parser.parse_args()
+def main(process_date: Optional[str] = None, full: bool = False, data_inicio: Optional[str] = None):
+    if process_date is not None or full or data_inicio is not None:
+        class Args:
+            def __init__(self, date, full, data_inicio):
+                self.date = date
+                self.full = full
+                self.data_inicio = data_inicio
+        args = Args(process_date, full, data_inicio)
+    else:
+        parser = argparse.ArgumentParser(description="Processa camada Silver")
+        parser.add_argument("--date", type=str, help="Data específica (YYYY-MM-DD)")
+        parser.add_argument("--full", action="store_true", help="Força overwrite em todas as fontes")
+        parser.add_argument("--data-inicio", type=str, help="Data inicial para --full (YYYY-MM-DD)")
+        args = parser.parse_args()
 
     config = carregar_config()
     config.setdefault("settings", {})

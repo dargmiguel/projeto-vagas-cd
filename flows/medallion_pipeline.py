@@ -31,9 +31,10 @@ def run_command(command_list):
     return result
 
 @task(name="Bronze Layer (Ingestão)")
-def bronze_gupy():
+def bronze_gupy(is_full_run: bool = False):
     print("--- Iniciando Bronze: Gupy ---")
-    run_command([sys.executable, '-m', 'src.bronze.gupy_scraper', '--mode', 'auto'])
+    mode = 'full' if is_full_run else 'auto'
+    run_command([sys.executable, '-m', 'src.bronze.gupy_scraper', '--mode', mode])
     print("Bronze Concluído")
 
 @task(name="Silver Layer (Limpeza)")
@@ -65,8 +66,8 @@ def gold_aggregates():
     print("Gold Concluído")
 
 @flow(name="vagas_pipeline")
-def medallion_pipeline():
-    bronze_gupy()
+def medallion_pipeline(is_full_run: bool = False):
+    bronze_gupy(is_full_run=is_full_run)
     silver_gupy()
     gold_aggregates()
 

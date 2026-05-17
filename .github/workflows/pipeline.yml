@@ -1,0 +1,100 @@
+name: Medallion Pipeline (Serverless)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Executar"
+        required: true
+        type: choice
+        default: "auto"
+        options:
+          - auto
+          - full
+          - incremental
+      skip_sync:
+        description: "Skippar Neon PostgreSQL sync"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: medallion-pipeline
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      DATA_PATH: "data"
+      GUPY_API: ${{ secrets.GUPY_API }}
+      NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+      INTERVAL_PIPELINE: "1800"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Restore checkpoint cache
+        id: restore-checkpoint
+        uses: actions/cache@v4
+        with:
+          path: data/checkpoints
+          key: gupy-checkpoint-latest
+          restore-keys: |
+            gupy-checkpoint-latest
+
+      - name: Run Medallion Pipeline
+        id: pipeline
+        run: |
+          MODE="${{ inputs.mode || 'auto' }}"
+          SKIP_SYNC="${{ inputs.skip_sync || false }}"
+
+          echo "▶ Mode: ${MODE}"
+          echo "▶ Skip Sync: ${SKIP_SYNC}"
+
+          ARGS="--mode ${MODE}"
+          if [ "${SKIP_SYNC}" = "true" ]; then
+            ARGS="${ARGS} --skip-sync"
+          fi
+
+          uv run python run_pipeline.py ${ARGS}
+
+      - name: Save checkpoint cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/checkpoints
+          key: gupy-checkpoint-latest
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            logs/
+            data/checkpoints/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "Pipeline failed! Check logs at:"
+          echo "   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

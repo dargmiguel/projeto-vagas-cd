@@ -12,7 +12,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def carregar_config():
-    config_path = Path("src/gold/config/gold_config.yaml")
+    # Resolve relative to this file (works regardless of CWD)
+    config_path = Path(__file__).resolve().parent / "config" / "gold_config.yaml"
     with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
