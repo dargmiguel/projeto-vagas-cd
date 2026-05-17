@@ -97,7 +97,7 @@ def processar_source(source_name: str,
         mode=write_mode,
         storage_options={"allow_unsafe_rename": "true"},
         delta_write_options={
-            "schema_mode": "overwrite",
+            "schema_mode": "overwrite" if write_mode == "overwrite" else "merge",
             "partition_by": ["ano_publicacao", "mes_publicacao"]
         }
     )
